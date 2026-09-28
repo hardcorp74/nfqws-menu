@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.6.84"
+SCRIPT_VERSION="0.6.85"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -929,7 +929,9 @@ install_nfqws2() {
   if is_installed "nfqws-keenetic"; then
     warn "Обнаружен nfqws-keenetic. Рекомендуется удалить его перед установкой nfqws2."
     if confirm_no "Удалить nfqws-keenetic и веб-интерфейс?"; then
-      opkg remove --autoremove nfqws-keenetic-web nfqws-keenetic 2>/dev/null || true
+      stop_nfqws1_hard
+      opkg remove nfqws-keenetic-web nfqws-keenetic 2>/dev/null || true
+      stop_nfqws1_hard
     fi
   fi
   install_deps
@@ -1094,6 +1096,10 @@ _opkg_install_ipk() {
 
   # Та же версия: обычный install даст «up to date» и не тронет файлы
   info "Та же версия ($cur) — force-reinstall"
+  case "$pkg" in
+    nfqws2-keenetic) stop_nfqws2_hard ;;
+    nfqws-keenetic)  stop_nfqws1_hard ;;
+  esac
   PKG_UPGRADE=1 opkg install --force-reinstall "$dest"
   return $?
 }
@@ -1231,7 +1237,9 @@ menu_install_ipk_direct() {
       if is_installed "nfqws-keenetic"; then
         warn "Обнаружен nfqws-keenetic. Рекомендуется удалить его перед установкой nfqws2."
         if confirm_no "Удалить nfqws-keenetic и веб-интерфейс?"; then
-          opkg remove --autoremove nfqws-keenetic-web nfqws-keenetic 2>/dev/null || true
+          stop_nfqws1_hard
+          opkg remove nfqws-keenetic-web nfqws-keenetic 2>/dev/null || true
+          stop_nfqws1_hard
         fi
       fi
       install_ipk_from_repo "nfqws2-keenetic" "nfqws2-keenetic" "$base2" "$v2" || return 1
@@ -4834,6 +4842,46 @@ menu_change_fake_blob() {
 }
 
 
+
+# Принудительная остановка nfqws/nfqws2 перед remove/reinstall.
+# init is_running() ломается на пустом pidfile (bad number / kill without pid),
+# из-за чего процесс остаётся висеть после opkg remove.
+stop_nfqws2_hard() {
+  [ -x /opt/etc/init.d/S51nfqws2 ] && /opt/etc/init.d/S51nfqws2 stop 2>/dev/null || true
+  killall nfqws2 2>/dev/null || true
+  # на всякий случай по полному пути
+  killall /opt/usr/bin/nfqws2 2>/dev/null || true
+  rm -f /opt/var/run/nfqws2.pid
+}
+
+stop_nfqws1_hard() {
+  [ -x /opt/etc/init.d/S51nfqws ] && /opt/etc/init.d/S51nfqws stop 2>/dev/null || true
+  killall nfqws 2>/dev/null || true
+  killall /opt/usr/bin/nfqws 2>/dev/null || true
+  rm -f /opt/var/run/nfqws.pid
+}
+
+# Удаление пакета nfqws* с предварительным kill
+remove_nfqws_pkg() {
+  local pkg="$1"
+  case "$pkg" in
+    nfqws2-keenetic)
+      info "Остановка nfqws2 перед удалением..."
+      stop_nfqws2_hard
+      ;;
+    nfqws-keenetic)
+      info "Остановка nfqws перед удалением..."
+      stop_nfqws1_hard
+      ;;
+  esac
+  opkg remove "$pkg"
+  # хвосты после remove
+  case "$pkg" in
+    nfqws2-keenetic) stop_nfqws2_hard ;;
+    nfqws-keenetic)  stop_nfqws1_hard ;;
+  esac
+}
+
 menu_remove() {
   echo
   printf '%s\n' "${BOLD}Что удалить?${NC}"
@@ -4874,7 +4922,11 @@ menu_remove() {
     b|B|б|Б) remove_backups ;;
     a|A|а|А)
       if confirm_no "Точно удалить все пакеты NFQWS (и dpi-detector, если есть)?"; then
-        opkg remove --autoremove nfqws-keenetic-web nfqws2-keenetic nfqws-keenetic 2>/dev/null || true
+        stop_nfqws2_hard
+        stop_nfqws1_hard
+        opkg remove nfqws-keenetic-web nfqws2-keenetic nfqws-keenetic 2>/dev/null || true
+        stop_nfqws2_hard
+        stop_nfqws1_hard
         remove_dpi_detector
         info "Удаление завершено."
       fi
@@ -4896,8 +4948,12 @@ menu_remove() {
         opera-proxy)   remove_opera_proxy ;;
         KeenKit)       remove_keenkit ;;
         telemt)        remove_telemt ;;
+        nfqws-keenetic|nfqws2-keenetic)
+          remove_nfqws_pkg "$target" || true
+          info "$target удалён."
+          ;;
         *)
-          opkg remove --autoremove "$target"
+          opkg remove "$target"
           info "$target удалён."
           ;;
       esac
