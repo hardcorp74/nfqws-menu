@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.6.85"
+SCRIPT_VERSION="0.7.1"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -96,8 +96,8 @@ ui_apply_lang() {
     ru)
       UI_UTF8=1
       RUN_MARK=" ⚡"
-      UPD_MARK=" ⬆"
-      LBL_UPD_LEGEND="⬆ — доступна новая версия"
+      UPD_MARK=" *"
+      LBL_UPD_LEGEND="* — доступна новая версия"
       LBL_ARCH="Архитектура"
       LBL_INSTALLED="Установленные компоненты:"
       LBL_NONE="— ничего не установлено —"
@@ -132,8 +132,8 @@ ui_apply_lang() {
       UI_LANG="en"
       UI_UTF8=0
       RUN_MARK=" *"
-      UPD_MARK=" ^"
-      LBL_UPD_LEGEND="^ - a newer version is available"
+      UPD_MARK=" *"
+      LBL_UPD_LEGEND="* - a newer version is available"
       LBL_ARCH="Arch"
       LBL_INSTALLED="Installed:"
       LBL_NONE="-- none --"
@@ -3382,30 +3382,56 @@ extract_script_version() {
 }
 
 update_self() {
-  local url tmp remote_ver dest="/opt/nfqws-menu.sh"
-  url="${RAW_BASE}/nfqws-menu.sh?t=$(date +%s)"
+  local url tmp remote_ver dest="/opt/nfqws-menu.sh" syn_err
+
+  info "Скачивание nfqws-menu.sh ..."
   tmp="/tmp/nfqws-menu-update-$$.sh"
-  if ! download_file "$url" "$tmp" 2>/dev/null; then
-    url="${RAW_BASE}/nfqws-menu.sh"
-    if ! download_file "$url" "$tmp" 2>/dev/null; then
-      rm -f "$tmp"
-      return 1
-    fi
-  fi
-  if ! head -1 "$tmp" | grep -qE '^#!/(usr/)?bin/(sh|bash)' || ! grep -q 'SCRIPT_VERSION=' "$tmp" 2>/dev/null; then
+  rm -f "$tmp"
+  # без ?t= — ломает часть зеркал/CDN
+  url="${RAW_BASE}/nfqws-menu.sh"
+  if ! download_file "$url" "$tmp"; then
+    error "Не удалось скачать обновление"
     rm -f "$tmp"
     return 1
   fi
+  if [ ! -s "$tmp" ]; then
+    error "Скачанный файл пуст"
+    rm -f "$tmp"
+    return 1
+  fi
+  if ! head -1 "$tmp" | grep -qE '^#!/(usr/)?bin/(sh|bash)'; then
+    error "В файле нет shebang — похоже, скачался не скрипт"
+    rm -f "$tmp"
+    return 1
+  fi
+  if ! grep -q 'SCRIPT_VERSION=' "$tmp" 2>/dev/null; then
+    error "В файле нет SCRIPT_VERSION"
+    rm -f "$tmp"
+    return 1
+  fi
+  # критично: не ставить битый файл (иначе line N: unexpected EOF)
+  syn_err=$(sh -n "$tmp" 2>&1) || {
+    error "Скачанный скрипт с синтаксической ошибкой — отмена"
+    [ -n "$syn_err" ] && printf '%s
+' "$syn_err" >&2
+    rm -f "$tmp"
+    return 1
+  }
   remote_ver=$(extract_script_version "$tmp")
   [ -z "$remote_ver" ] && remote_ver="?"
+  info "Установка v${remote_ver} → $dest"
   if ! cat "$tmp" > "$dest"; then
+    error "Не удалось записать $dest"
     rm -f "$tmp"
     return 1
   fi
   chmod +x "$dest" 2>/dev/null || true
   rm -f "$tmp"
+  # сбросить кэш версий — иначе старая метка
+  rm -f "${CACHE_DIR}/updates.cache" 2>/dev/null || true
   unset SCRIPT_PATH
   export SCRIPT_PATH="$dest"
+  info "Перезапуск меню..."
   exec sh "$dest"
 }
 
@@ -5314,13 +5340,34 @@ upd_local() {
   return 0
 }
 
-# Метка к строке: « ⬆1.2.7» — версия на сервере отличается от установленной.
+# Сравнение версий a > b (semver-подобно: 1.2.10 > 1.2.9). 0 = да.
+ver_gt() {
+  local a="$1" b="$2" ia ib n=1
+  [ -n "$a" ] && [ -n "$b" ] || return 1
+  [ "$a" = "$b" ] && return 1
+  while [ $n -le 8 ]; do
+    ia="${a%%.*}"; ib="${b%%.*}"
+    case "$ia" in ''|*[!0-9]*) ia=0 ;; esac
+    case "$ib" in ''|*[!0-9]*) ib=0 ;; esac
+    [ "$ia" -gt "$ib" ] 2>/dev/null && return 0
+    [ "$ia" -lt "$ib" ] 2>/dev/null && return 1
+    [ "$a" = "$ia" ] && a=0 || a="${a#*.}"
+    [ "$b" = "$ib" ] && b=0 || b="${b#*.}"
+    [ "$a" = "0" ] && [ "$b" = "0" ] && [ $n -gt 1 ] && return 1
+    n=$((n + 1))
+  done
+  return 1
+}
+
+# Метка: только если на сервере НОВЕЕ, чем установлено. ASCII « *1.2.7».
 upd_mark() {
   local remote installed
   remote=$(upd_remote "$1")
   [ -n "$remote" ] || return 0
   installed=$(upd_local "$1")
+  [ -n "$installed" ] || return 0
   [ "$remote" = "$installed" ] && return 0
+  ver_gt "$remote" "$installed" || return 0
   printf '%s%s' "$UPD_MARK" "$remote"
   return 0
 }
