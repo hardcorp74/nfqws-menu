@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.7.6"
+SCRIPT_VERSION="0.7.3"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -757,28 +757,23 @@ show_installed() {
   fi
   print_pkg_info "magitrickle"        "magitrickle" && shown=1
 
-  if [ -x /opt/bin/dpi-detector ] || command -v dpi-detector >/dev/null 2>&1; then
-    local dpi_bin dpi_ver=""
-    if [ -x /opt/bin/dpi-detector ]; then
-      dpi_bin="/opt/bin/dpi-detector"
-    else
-      dpi_bin=$(command -v dpi-detector)
-    fi
-    dpi_ver=$("$dpi_bin" --version 2>/dev/null | head -1 | sed -n 's/.*dpi-detector[[:space:]]\+\([^[:space:]]*\).*/\1/p')
+  if is_dpi_detector_installed; then
+    local dpi_ver
+    dpi_ver=$(dpi_detector_version 2>/dev/null) || dpi_ver=""
     print_tool_info "dpi-detector" "${dpi_ver:-ok}"
     shown=1
   fi
 
   if is_installed "awg-manager" || [ -d /opt/etc/awg-manager ]; then
-    local awg_name="awg-manager" awg_info="ok"
-    if [ -x /opt/etc/awg-manager/singbox/sing-box ] || [ -f /opt/etc/awg-manager/singbox/sing-box ]; then
-      awg_name="awg-manager [+SB]"
-    fi
+    local awg_info="ok"
     if is_installed "awg-manager"; then
       awg_info=$(pkg_version awg-manager)
       [ -z "$awg_info" ] && awg_info="ok"
     fi
-    print_tool_info "$awg_name" "$awg_info" "awg"
+    if [ -x /opt/etc/awg-manager/singbox/sing-box ] || [ -f /opt/etc/awg-manager/singbox/sing-box ]; then
+      awg_info="${awg_info} [+SB]"
+    fi
+    print_tool_info "awg-manager" "$awg_info" "awg"
     shown=1
   fi
 
@@ -4492,6 +4487,19 @@ is_dpi_detector_installed() {
   [ -x /opt/bin/dpi-detector ] || command -v dpi-detector >/dev/null 2>&1
 }
 
+dpi_detector_version() {
+  local bin
+  if [ -x /opt/bin/dpi-detector ]; then
+    bin="/opt/bin/dpi-detector"
+  elif command -v dpi-detector >/dev/null 2>&1; then
+    bin=$(command -v dpi-detector)
+  else
+    return 1
+  fi
+  "$bin" --version 2>/dev/null | head -1 | \
+    sed -n 's/.*dpi-detector[[:space:]]\+\([^[:space:]]*\).*/\1/p'
+}
+
 remove_dpi_detector() {
   local paths="/opt/bin/dpi-detector /tmp/dpi-detector" f found=0
   [ -n "$HOME" ] && paths="$paths $HOME/dpi-detector"
@@ -5315,12 +5323,22 @@ upd_check_bg() {
     ver=$(upd_release_tag "valnesfjord/tg-ws-proxy-rs" 2>/dev/null) || ver=""
     [ -n "$ver" ] && printf 'tg-ws-proxy-rs %s\n' "$ver" >> "$tmp"
   fi
+  if is_dpi_detector_installed; then
+    ver=$(upd_release_tag "Runnin4ik/dpi-detector" 2>/dev/null) || ver=""
+    [ -n "$ver" ] && printf 'dpi-detector %s\n' "$ver" >> "$tmp"
+  fi
+  if is_awg_manager_installed; then
+    ver=$(upd_release_tag "hoaxisr/awg-manager" 2>/dev/null) || ver=""
+    [ -n "$ver" ] && printf 'awg-manager %s\n' "$ver" >> "$tmp"
+  fi
   # Время проверки пишется всегда: иначе неудачный прогон повторялся бы на
   # каждом входе в меню.
   printf 'checked %s\n' "$(date +%s)" >> "$tmp"
   mv "$tmp" "$UPD_CACHE" 2>/dev/null || { rm -f "$tmp"; return 1; }
-  # Меню могло уже завершиться, а PID — достаться другому процессу: сверяем
-  # cmdline, прежде чем слать сигнал.
+  # USR1 только если есть реальные метки — иначе лишний clear меню
+  if ! upd_has_pending; then
+    return 0
+  fi
   if [ -r "/proc/${MENU_PID}/cmdline" ] &&
      tr -d '\0' < "/proc/${MENU_PID}/cmdline" 2>/dev/null | grep -q 'nfqws-menu'
   then
@@ -5353,6 +5371,10 @@ upd_start() {
   MENU_PID=$$
   trap 'UPD_REDRAW=1' USR1
   trap 'upd_cleanup' EXIT
+  # NFQWS_MENU_UPDATE_BG=0 — без фоновой проверки (без второго кадра)
+  case "${NFQWS_MENU_UPDATE_BG:-1}" in
+    0|false|FALSE|no|NO) return 0 ;;
+  esac
   upd_cache_fresh && return 0
   ( upd_check_bg ) </dev/null >/dev/null 2>&1 &
   UPD_JOB=$!
@@ -5370,6 +5392,8 @@ upd_local() {
   case "$1" in
     menu)           printf '%s' "$SCRIPT_VERSION" ;;
     tg-ws-proxy-rs) tg_ws_proxy_rs_version 2>/dev/null ;;
+    dpi-detector)   dpi_detector_version 2>/dev/null ;;
+    awg-manager)    pkg_version "awg-manager" 2>/dev/null ;;
     *)              pkg_version "$1" 2>/dev/null ;;
   esac
   return 0
@@ -5391,6 +5415,17 @@ ver_gt() {
     [ "$a" = "0" ] && [ "$b" = "0" ] && [ $n -gt 1 ] && return 1
     n=$((n + 1))
   done
+  return 1
+}
+
+# Есть ли хоть одна метка обновления по текущему кэшу.
+upd_has_pending() {
+  local key rest
+  [ -f "$UPD_CACHE" ] || return 1
+  while read -r key rest; do
+    case "$key" in ''|checked) continue ;; esac
+    [ -n "$(upd_mark "$key")" ] && return 0
+  done < "$UPD_CACHE"
   return 1
 }
 
@@ -5479,7 +5514,6 @@ main_menu() {
     echo "      00. $LBL_00"
     echo
     ask "$LBL_PROMPT"
-    UPD_REDRAW=0
     if read_choice choice; then
       :   # обычный путь: выбор разбирается ниже
     elif [ "$READ_RC" = 1 ]; then
@@ -5522,7 +5556,6 @@ main_menu() {
     drain_stdin
     echo
     ask "$LBL_BACK"
-    UPD_REDRAW=0
     if read_choice _; then
       :
     elif [ "$READ_RC" = 1 ]; then
