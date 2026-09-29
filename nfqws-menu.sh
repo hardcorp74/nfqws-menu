@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.7.3"
+SCRIPT_VERSION="0.7.4"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -172,7 +172,7 @@ ui_apply_lang "$(ui_detect_default_lang)"
 # --- Проверка новых версий: значения по умолчанию --------------------------
 # Метки и подпись задаёт ui_apply_lang; здесь — только то, что нужно, если
 # отрисовка случится до выбора языка.
-: "${UPD_MARK:= ^}"
+: "${UPD_MARK:= *}"
 : "${LBL_UPD_LEGEND:=$UPD_MARK - a newer version is available}"
 UPD_TTL="${NFQWS_MENU_UPDATE_TTL:-21600}"   # 6 ч
 UPD_REDRAW=0
@@ -3382,44 +3382,80 @@ extract_script_version() {
 }
 
 update_self() {
-  local url tmp remote_ver dest="/opt/nfqws-menu.sh" syn_err
+  # Скачать с нескольких URL, проверяя КАЖДЫЙ (размер + shebang + sh -n).
+  # download_file останавливается на первом HTTP-200 — зеркало может отдать обрывок.
+  local dest="/opt/nfqws-menu.sh" tmp="/tmp/nfqws-menu-update-$$.sh"
+  local url remote_ver syn_err sz ok=0 _c _m _w
+  local min_bytes=50000
 
   info "Скачивание nfqws-menu.sh ..."
-  tmp="/tmp/nfqws-menu-update-$$.sh"
   rm -f "$tmp"
-  # без ?t= — ломает часть зеркал/CDN
-  url="${RAW_BASE}/nfqws-menu.sh"
-  if ! download_file "$url" "$tmp"; then
-    error "Не удалось скачать обновление"
+
+  _c="$CURL_CONNECT_TIMEOUT"; _m="$CURL_MAX_TIME"; _w="$WGET_TIMEOUT"
+  CURL_CONNECT_TIMEOUT=10
+  CURL_MAX_TIME=120
+  WGET_TIMEOUT=120
+
+  # Порядок: github raw → fastly → jsdelivr → ghproxy (каждый валидируем)
+  for url in \
+    "${RAW_BASE}/nfqws-menu.sh" \
+    "https://fastly.jsdelivr.net/gh/rndnaame/nfqws-menu@main/nfqws-menu.sh" \
+    "https://cdn.jsdelivr.net/gh/rndnaame/nfqws-menu@main/nfqws-menu.sh" \
+    "https://ghproxy.net/https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/nfqws-menu.sh"
+  do
+    rm -f "$tmp"
+    info "Пробуем: $url"
+    if ! _http_get_file "$url" "$tmp"; then
+      warn "  не скачалось"
+      continue
+    fi
+    sz=$(wc -c < "$tmp" 2>/dev/null | tr -d ' \t')
+    case "$sz" in ''|*[!0-9]*) sz=0 ;; esac
+    if [ "$sz" -lt "$min_bytes" ]; then
+      warn "  слишком маленький файл (${sz} байт) — пропуск"
+      rm -f "$tmp"
+      continue
+    fi
+    if ! head -1 "$tmp" | grep -qE '^#!/(usr/)?bin/(sh|bash)'; then
+      warn "  нет shebang — пропуск"
+      rm -f "$tmp"
+      continue
+    fi
+    if ! grep -q 'SCRIPT_VERSION=' "$tmp" 2>/dev/null; then
+      warn "  нет SCRIPT_VERSION — пропуск"
+      rm -f "$tmp"
+      continue
+    fi
+    syn_err=$(sh -n "$tmp" 2>&1) || {
+      warn "  syntax error — пропуск"
+      [ -n "$syn_err" ] && printf '%s\n' "$syn_err" >&2
+      rm -f "$tmp"
+      continue
+    }
+    ok=1
+    info "OK (${sz} байт)"
+    break
+  done
+
+  CURL_CONNECT_TIMEOUT="$_c"
+  CURL_MAX_TIME="$_m"
+  WGET_TIMEOUT="$_w"
+
+  if [ "$ok" -ne 1 ] || [ ! -s "$tmp" ]; then
+    error "Не удалось скачать целый скрипт ни с одного источника"
     rm -f "$tmp"
     return 1
   fi
-  if [ ! -s "$tmp" ]; then
-    error "Скачанный файл пуст"
-    rm -f "$tmp"
-    return 1
-  fi
-  if ! head -1 "$tmp" | grep -qE '^#!/(usr/)?bin/(sh|bash)'; then
-    error "В файле нет shebang — похоже, скачался не скрипт"
-    rm -f "$tmp"
-    return 1
-  fi
-  if ! grep -q 'SCRIPT_VERSION=' "$tmp" 2>/dev/null; then
-    error "В файле нет SCRIPT_VERSION"
-    rm -f "$tmp"
-    return 1
-  fi
-  # критично: не ставить битый файл (иначе line N: unexpected EOF)
-  syn_err=$(sh -n "$tmp" 2>&1) || {
-    error "Скачанный скрипт с синтаксической ошибкой — отмена"
-    [ -n "$syn_err" ] && printf '%s
-' "$syn_err" >&2
-    rm -f "$tmp"
-    return 1
-  }
+
   remote_ver=$(extract_script_version "$tmp")
   [ -z "$remote_ver" ] && remote_ver="?"
-  info "Установка v${remote_ver} → $dest"
+  if [ "$remote_ver" = "$SCRIPT_VERSION" ]; then
+    info "Уже актуальная версия: v${SCRIPT_VERSION}"
+    rm -f "$tmp"
+    return 0
+  fi
+
+  info "Установка v${remote_ver} (было v${SCRIPT_VERSION}) → $dest"
   if ! cat "$tmp" > "$dest"; then
     error "Не удалось записать $dest"
     rm -f "$tmp"
@@ -3427,7 +3463,6 @@ update_self() {
   fi
   chmod +x "$dest" 2>/dev/null || true
   rm -f "$tmp"
-  # сбросить кэш версий — иначе старая метка
   rm -f "${CACHE_DIR}/updates.cache" 2>/dev/null || true
   unset SCRIPT_PATH
   export SCRIPT_PATH="$dest"
