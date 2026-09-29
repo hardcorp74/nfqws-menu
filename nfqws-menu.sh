@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.7.7"
+SCRIPT_VERSION="0.7.8"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -471,6 +471,81 @@ download_file() {
   return 1
 }
 
+# Скачать shell-скрипт с проверкой целостности (зеркало может отдать обрывок).
+# $1=url $2=dest [$3=min_bytes, по умолчанию 8000]
+download_sh_validated() {
+  local url="$1" dest="$2" min_bytes="${3:-8000}"
+  local alt iface sz syn_err ok=0 _c _m _w
+
+  mkdir -p "$(dirname "$dest")" 2>/dev/null || true
+  rm -f "$dest"
+
+  _c="$CURL_CONNECT_TIMEOUT"; _m="$CURL_MAX_TIME"; _w="$WGET_TIMEOUT"
+  CURL_CONNECT_TIMEOUT=10
+  CURL_MAX_TIME=120
+  WGET_TIMEOUT=120
+
+  for alt in $(github_alt_urls "$url"); do
+    rm -f "$dest"
+    if ! _http_get_file "$alt" "$dest"; then
+      continue
+    fi
+    sz=$(wc -c < "$dest" 2>/dev/null | tr -d ' \t')
+    case "$sz" in ''|*[!0-9]*) sz=0 ;; esac
+    if [ "$sz" -lt "$min_bytes" ]; then
+      warn "Обрывок с зеркала (${sz} байт) — пробуем другой источник..." >&2
+      rm -f "$dest"
+      continue
+    fi
+    if ! head -1 "$dest" | grep -qE '^#!/(usr/)?bin/(sh|bash)'; then
+      warn "Нет shebang — пропуск источника" >&2
+      rm -f "$dest"
+      continue
+    fi
+    syn_err=$(sh -n "$dest" 2>&1) || {
+      warn "Скрипт битый (syntax) — пропуск источника" >&2
+      [ -n "$syn_err" ] && printf '%s\n' "$syn_err" >&2
+      rm -f "$dest"
+      continue
+    }
+    ok=1
+    [ "$alt" != "$url" ] && info "Скачано через зеркало" >&2
+    break
+  done
+
+  # туннели, если все зеркала дали брак
+  if [ "$ok" -ne 1 ] && command -v curl >/dev/null 2>&1; then
+    for iface in $(list_up_fallback_ifaces); do
+      warn "Пробуем через $iface ..." >&2
+      for alt in $(github_alt_urls "$url"); do
+        rm -f "$dest"
+        if ! _http_get_file "$alt" "$dest" "$iface"; then
+          continue
+        fi
+        sz=$(wc -c < "$dest" 2>/dev/null | tr -d ' \t')
+        case "$sz" in ''|*[!0-9]*) sz=0 ;; esac
+        [ "$sz" -lt "$min_bytes" ] && { rm -f "$dest"; continue; }
+        head -1 "$dest" | grep -qE '^#!/(usr/)?bin/(sh|bash)' || { rm -f "$dest"; continue; }
+        sh -n "$dest" 2>/dev/null || { rm -f "$dest"; continue; }
+        ok=1
+        info "Скачано через $iface" >&2
+        break 2
+      done
+    done
+  fi
+
+  CURL_CONNECT_TIMEOUT="$_c"
+  CURL_MAX_TIME="$_m"
+  WGET_TIMEOUT="$_w"
+
+  if [ "$ok" -ne 1 ] || [ ! -s "$dest" ]; then
+    rm -f "$dest"
+    return 1
+  fi
+  return 0
+}
+
+
 
 # ---------------------------------------------------------------------------
 # SHA256 для blobs (strategies/blobs/SHA256SUMS)
@@ -545,15 +620,8 @@ run_remote_sh() {
   local url="$1" tmp rc=0
   tmp="/tmp/nfqws-remote-$$.sh"
   rm -f "$tmp"
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$url" -o "$tmp" 2>/dev/null || rm -f "$tmp"
-  fi
-  if [ ! -s "$tmp" ] && command -v wget >/dev/null 2>&1; then
-    wget -qO "$tmp" "$url" 2>/dev/null || rm -f "$tmp"
-  fi
-  if [ ! -s "$tmp" ]; then
-    rm -f "$tmp"
-    error "Не удалось скачать: $url"
+  if ! download_sh_validated "$url" "$tmp"; then
+    error "Не удалось скачать целый скрипт: $url"
     return 1
   fi
   # Полный tty: stdin+stdout+stderr — иначе awg-menu / интерактив не поднимается
@@ -3824,8 +3892,8 @@ tg_ws_proxy_rs_install() {
   local script="/tmp/tgws-install.$$.sh" out rc upx_arg='' bin_size size_text
   tg_ws_proxy_rs_choose_variant || return 1
   [ "$TG_WS_PROXY_RS_UPX" = "1" ] && upx_arg='--upx'
-  if ! download_file "$url" "$script"; then
-    error "Не удалось скачать install.sh — проверьте доступ к GitHub."
+  if ! download_sh_validated "$url" "$script" 20000; then
+    error "Не удалось скачать целый install.sh — проверьте доступ к GitHub / зеркалам."
     return 1
   fi
   tg_ws_proxy_rs_ensure_secret || return 1
