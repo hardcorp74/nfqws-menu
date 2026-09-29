@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.7.8"
+SCRIPT_VERSION="0.8.0"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -22,10 +22,10 @@ FALLBACK_IFACES="awg0 t2s0 nwg0 opkgtun0 opgktun0"
 
 # Таймауты скачивания (сек). Чуть выше для сильного DPI, но не слишком —
 # чтобы быстрее уходить на fallback/зеркало.
-CURL_CONNECT_TIMEOUT=10
-CURL_MAX_TIME=30
+CURL_CONNECT_TIMEOUT=5
+CURL_MAX_TIME=25
 CURL_MAX_TIME_LARGE=180   # rkn.list ~2 МБ и подобные
-WGET_TIMEOUT=25
+WGET_TIMEOUT=20
 
 # LD_LIBRARY_PATH не экспортируем глобально: /opt ломает ndmc (OpenSSL),
 # system-only ломает Entware wget/curl. Для ndmc — отдельная обёртка.
@@ -278,7 +278,7 @@ list_strategies_from_cache() {
 # Альтернативные URL для raw.githubusercontent.com / api.github.com (зеркала CDN).
 # Печатает по одному URL на строку; исходный — первым.
 github_alt_urls() {
-  # Порядок: ghproxy → CDN → оригинал (при DPI быстрее)
+  # Порядок: оригинал → CDN → ghproxy (мёртвый proxy не первым)
   local url="$1" rest owner repo ref path_rest
 
   case "$url" in
@@ -292,19 +292,27 @@ github_alt_urls() {
           refs/heads/*) ref="${ref#refs/heads/}" ;;
           refs/tags/*)  ref="${ref#refs/tags/}" ;;
         esac
-        printf '%s\n' "https://ghproxy.net/https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${path_rest}"
-        printf '%s\n' "https://cdn.jsdelivr.net/gh/${owner}/${repo}@${ref}/${path_rest}"
+        printf '%s\n' "https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${path_rest}"
         printf '%s\n' "https://fastly.jsdelivr.net/gh/${owner}/${repo}@${ref}/${path_rest}"
+        printf '%s\n' "https://cdn.jsdelivr.net/gh/${owner}/${repo}@${ref}/${path_rest}"
+        printf '%s\n' "https://ghproxy.net/https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${path_rest}"
+        return 0
       fi
       ;;
     https://api.github.com/*)
+      printf '%s\n' "$url"
       printf '%s\n' "https://ghproxy.net/${url}"
+      return 0
       ;;
     https://github.com/*/releases/download/*)
+      printf '%s\n' "$url"
       printf '%s\n' "https://ghproxy.net/${url}"
+      return 0
       ;;
     https://*.github.io/*|http://*.github.io/*)
+      printf '%s\n' "$url"
       printf '%s\n' "https://ghproxy.net/${url}"
+      return 0
       ;;
   esac
   printf '%s\n' "$url"
@@ -376,38 +384,140 @@ _http_get_file_progress() {
 }
 
 # Как download_file, но с отображением хода (stderr).
-download_file_progress() {
-  local url="$1" dest="$2" alt iface
+# ---------------------------------------------------------------------------
+# Единое скачивание: зеркала → (опц.) туннели → проверки
+# download_file URL DEST [progress] [sh] [min=N] [timeout=N] [connect=N]
+#   progress  — progress-bar (большие файлы)
+#   sh        — shebang + sh -n (install.sh / меню)
+#   min=N     — минимум байт (для sh по умолчанию 8000)
+#   timeout=N — CURL_MAX_TIME / WGET на эту загрузку
+# ---------------------------------------------------------------------------
+download_file() {
+  local url="$1" dest="$2"
+  shift 2
+  local progress=0 validate_sh=0 min_bytes=0 timeout="" connect=""
+  local alt iface sz syn_err ok=0 _c _m _w
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      progress) progress=1 ;;
+      sh|script) validate_sh=1 ;;
+      min=*) min_bytes="${1#min=}" ;;
+      timeout=*) timeout="${1#timeout=}" ;;
+      connect=*) connect="${1#connect=}" ;;
+    esac
+    shift
+  done
+
+  case "$min_bytes" in ''|*[!0-9]*) min_bytes=0 ;; esac
+  if [ "$validate_sh" -eq 1 ] && [ "$min_bytes" -eq 0 ]; then
+    min_bytes=8000
+  fi
+
   mkdir -p "$(dirname "$dest")" 2>/dev/null || true
   rm -f "$dest"
 
+  _c="$CURL_CONNECT_TIMEOUT"
+  _m="$CURL_MAX_TIME"
+  _w="$WGET_TIMEOUT"
+  if [ -n "$connect" ]; then
+    CURL_CONNECT_TIMEOUT="$connect"
+  else
+    CURL_CONNECT_TIMEOUT=5
+  fi
+  if [ -n "$timeout" ]; then
+    CURL_MAX_TIME="$timeout"
+    WGET_TIMEOUT="$timeout"
+  elif [ "$progress" -eq 1 ]; then
+    CURL_MAX_TIME="$CURL_MAX_TIME_LARGE"
+    WGET_TIMEOUT="$CURL_MAX_TIME_LARGE"
+  else
+    CURL_MAX_TIME=25
+    WGET_TIMEOUT=20
+  fi
+
   for alt in $(github_alt_urls "$url"); do
-    if [ "$alt" != "$url" ]; then
-      info "Зеркало: $alt" >&2
-    fi
-    if _http_get_file_progress "$alt" "$dest"; then
-      [ "$alt" != "$url" ] && info "Скачано через зеркало" >&2
-      return 0
-    fi
     rm -f "$dest"
+    [ "$validate_sh" -eq 1 ] && info "Пробуем: $alt" >&2
+    if [ "$progress" -eq 1 ]; then
+      _http_get_file_progress "$alt" "$dest" || continue
+    else
+      _http_get_file "$alt" "$dest" || continue
+    fi
+
+    sz=$(wc -c < "$dest" 2>/dev/null | tr -d ' \t')
+    case "$sz" in ''|*[!0-9]*) sz=0 ;; esac
+    if [ "$min_bytes" -gt 0 ] && [ "$sz" -lt "$min_bytes" ]; then
+      warn "Обрывок (${sz} Б < ${min_bytes}) — другой источник..." >&2
+      rm -f "$dest"
+      continue
+    fi
+    if [ "$validate_sh" -eq 1 ]; then
+      if ! head -1 "$dest" | grep -qE '^#!/(usr/)?bin/(sh|bash)'; then
+        warn "Нет shebang — пропуск источника" >&2
+        rm -f "$dest"
+        continue
+      fi
+      syn_err=$(sh -n "$dest" 2>&1) || {
+        warn "Скрипт битый (syntax) — пропуск источника" >&2
+        [ -n "$syn_err" ] && printf '%s\n' "$syn_err" >&2
+        rm -f "$dest"
+        continue
+      }
+    fi
+
+    ok=1
+    [ "$alt" != "$url" ] && info "Скачано через зеркало" >&2
+    break
   done
 
-  if command -v curl >/dev/null 2>&1; then
+  if [ "$ok" -ne 1 ] && command -v curl >/dev/null 2>&1; then
     for iface in $(list_up_fallback_ifaces); do
       warn "Основной канал недоступен, пробуем через $iface ..." >&2
       for alt in $(github_alt_urls "$url"); do
-        if _http_get_file_progress "$alt" "$dest" "$iface"; then
-          info "Скачано через $iface" >&2
-          return 0
-        fi
         rm -f "$dest"
+        if [ "$progress" -eq 1 ]; then
+          _http_get_file_progress "$alt" "$dest" "$iface" || continue
+        else
+          _http_get_file "$alt" "$dest" "$iface" || continue
+        fi
+        sz=$(wc -c < "$dest" 2>/dev/null | tr -d ' \t')
+        case "$sz" in ''|*[!0-9]*) sz=0 ;; esac
+        if [ "$min_bytes" -gt 0 ] && [ "$sz" -lt "$min_bytes" ]; then
+          rm -f "$dest"
+          continue
+        fi
+        if [ "$validate_sh" -eq 1 ]; then
+          head -1 "$dest" | grep -qE '^#!/(usr/)?bin/(sh|bash)' || { rm -f "$dest"; continue; }
+          sh -n "$dest" 2>/dev/null || { rm -f "$dest"; continue; }
+        fi
+        ok=1
+        info "Скачано через $iface" >&2
+        break 2
       done
     done
   fi
 
-  rm -f "$dest"
-  return 1
+  CURL_CONNECT_TIMEOUT="$_c"
+  CURL_MAX_TIME="$_m"
+  WGET_TIMEOUT="$_w"
+
+  if [ "$ok" -ne 1 ] || [ ! -s "$dest" ]; then
+    rm -f "$dest"
+    return 1
+  fi
+  return 0
 }
+
+# Совместимость: тонкие обёртки (1–2 вызова в меню)
+download_file_progress() {
+  download_file "$1" "$2" progress
+}
+
+download_sh_validated() {
+  download_file "$1" "$2" sh "min=${3:-8000}" connect=5 timeout=25
+}
+
 
 # Скачать URL в stdout: прямой → зеркала GitHub → туннели (--interface).
 fetch_url() {
@@ -439,113 +549,6 @@ fetch_url() {
   fi
   return 1
 }
-
-# Скачать URL в файл: прямой → зеркала → туннели. Пустые/битые не оставляем.
-download_file() {
-  local url="$1" dest="$2" alt iface
-  mkdir -p "$(dirname "$dest")" 2>/dev/null || true
-  rm -f "$dest"
-
-  for alt in $(github_alt_urls "$url"); do
-    if _http_get_file "$alt" "$dest"; then
-      [ "$alt" != "$url" ] && info "Скачано через зеркало" >&2
-      return 0
-    fi
-    rm -f "$dest"
-  done
-
-  if command -v curl >/dev/null 2>&1; then
-    for iface in $(list_up_fallback_ifaces); do
-      warn "Основной канал недоступен, пробуем через $iface ..." >&2
-      for alt in $(github_alt_urls "$url"); do
-        if _http_get_file "$alt" "$dest" "$iface"; then
-          info "Скачано через $iface" >&2
-          return 0
-        fi
-        rm -f "$dest"
-      done
-    done
-  fi
-
-  rm -f "$dest"
-  return 1
-}
-
-# Скачать shell-скрипт с проверкой целостности (зеркало может отдать обрывок).
-# $1=url $2=dest [$3=min_bytes, по умолчанию 8000]
-download_sh_validated() {
-  local url="$1" dest="$2" min_bytes="${3:-8000}"
-  local alt iface sz syn_err ok=0 _c _m _w
-
-  mkdir -p "$(dirname "$dest")" 2>/dev/null || true
-  rm -f "$dest"
-
-  _c="$CURL_CONNECT_TIMEOUT"; _m="$CURL_MAX_TIME"; _w="$WGET_TIMEOUT"
-  CURL_CONNECT_TIMEOUT=10
-  CURL_MAX_TIME=120
-  WGET_TIMEOUT=120
-
-  for alt in $(github_alt_urls "$url"); do
-    rm -f "$dest"
-    if ! _http_get_file "$alt" "$dest"; then
-      continue
-    fi
-    sz=$(wc -c < "$dest" 2>/dev/null | tr -d ' \t')
-    case "$sz" in ''|*[!0-9]*) sz=0 ;; esac
-    if [ "$sz" -lt "$min_bytes" ]; then
-      warn "Обрывок с зеркала (${sz} байт) — пробуем другой источник..." >&2
-      rm -f "$dest"
-      continue
-    fi
-    if ! head -1 "$dest" | grep -qE '^#!/(usr/)?bin/(sh|bash)'; then
-      warn "Нет shebang — пропуск источника" >&2
-      rm -f "$dest"
-      continue
-    fi
-    syn_err=$(sh -n "$dest" 2>&1) || {
-      warn "Скрипт битый (syntax) — пропуск источника" >&2
-      [ -n "$syn_err" ] && printf '%s\n' "$syn_err" >&2
-      rm -f "$dest"
-      continue
-    }
-    ok=1
-    [ "$alt" != "$url" ] && info "Скачано через зеркало" >&2
-    break
-  done
-
-  # туннели, если все зеркала дали брак
-  if [ "$ok" -ne 1 ] && command -v curl >/dev/null 2>&1; then
-    for iface in $(list_up_fallback_ifaces); do
-      warn "Пробуем через $iface ..." >&2
-      for alt in $(github_alt_urls "$url"); do
-        rm -f "$dest"
-        if ! _http_get_file "$alt" "$dest" "$iface"; then
-          continue
-        fi
-        sz=$(wc -c < "$dest" 2>/dev/null | tr -d ' \t')
-        case "$sz" in ''|*[!0-9]*) sz=0 ;; esac
-        [ "$sz" -lt "$min_bytes" ] && { rm -f "$dest"; continue; }
-        head -1 "$dest" | grep -qE '^#!/(usr/)?bin/(sh|bash)' || { rm -f "$dest"; continue; }
-        sh -n "$dest" 2>/dev/null || { rm -f "$dest"; continue; }
-        ok=1
-        info "Скачано через $iface" >&2
-        break 2
-      done
-    done
-  fi
-
-  CURL_CONNECT_TIMEOUT="$_c"
-  CURL_MAX_TIME="$_m"
-  WGET_TIMEOUT="$_w"
-
-  if [ "$ok" -ne 1 ] || [ ! -s "$dest" ]; then
-    rm -f "$dest"
-    return 1
-  fi
-  return 0
-}
-
-
 
 # ---------------------------------------------------------------------------
 # SHA256 для blobs (strategies/blobs/SHA256SUMS)
@@ -3445,67 +3448,18 @@ extract_script_version() {
 }
 
 update_self() {
-  # Скачать с нескольких URL, проверяя КАЖДЫЙ (размер + shebang + sh -n).
-  # download_file останавливается на первом HTTP-200 — зеркало может отдать обрывок.
   local dest="/opt/nfqws-menu.sh" tmp="/tmp/nfqws-menu-update-$$.sh"
-  local url remote_ver syn_err sz ok=0 _c _m _w
-  local min_bytes=50000
+  local remote_ver url
 
   info "Скачивание nfqws-menu.sh ..."
   rm -f "$tmp"
-
-  _c="$CURL_CONNECT_TIMEOUT"; _m="$CURL_MAX_TIME"; _w="$WGET_TIMEOUT"
-  CURL_CONNECT_TIMEOUT=10
-  CURL_MAX_TIME=120
-  WGET_TIMEOUT=120
-
-  # Порядок: github raw → fastly → jsdelivr → ghproxy (каждый валидируем)
-  for url in \
-    "${RAW_BASE}/nfqws-menu.sh" \
-    "https://fastly.jsdelivr.net/gh/rndnaame/nfqws-menu@main/nfqws-menu.sh" \
-    "https://cdn.jsdelivr.net/gh/rndnaame/nfqws-menu@main/nfqws-menu.sh" \
-    "https://ghproxy.net/https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/nfqws-menu.sh"
-  do
-    rm -f "$tmp"
-    info "Пробуем: $url"
-    if ! _http_get_file "$url" "$tmp"; then
-      warn "  не скачалось"
-      continue
-    fi
-    sz=$(wc -c < "$tmp" 2>/dev/null | tr -d ' \t')
-    case "$sz" in ''|*[!0-9]*) sz=0 ;; esac
-    if [ "$sz" -lt "$min_bytes" ]; then
-      warn "  слишком маленький файл (${sz} байт) — пропуск"
-      rm -f "$tmp"
-      continue
-    fi
-    if ! head -1 "$tmp" | grep -qE '^#!/(usr/)?bin/(sh|bash)'; then
-      warn "  нет shebang — пропуск"
-      rm -f "$tmp"
-      continue
-    fi
-    if ! grep -q 'SCRIPT_VERSION=' "$tmp" 2>/dev/null; then
-      warn "  нет SCRIPT_VERSION — пропуск"
-      rm -f "$tmp"
-      continue
-    fi
-    syn_err=$(sh -n "$tmp" 2>&1) || {
-      warn "  syntax error — пропуск"
-      [ -n "$syn_err" ] && printf '%s\n' "$syn_err" >&2
-      rm -f "$tmp"
-      continue
-    }
-    ok=1
-    info "OK (${sz} байт)"
-    break
-  done
-
-  CURL_CONNECT_TIMEOUT="$_c"
-  CURL_MAX_TIME="$_m"
-  WGET_TIMEOUT="$_w"
-
-  if [ "$ok" -ne 1 ] || [ ! -s "$tmp" ]; then
+  url="${RAW_BASE}/nfqws-menu.sh"
+  if ! download_file "$url" "$tmp" sh min=50000 connect=5 timeout=40; then
     error "Не удалось скачать целый скрипт ни с одного источника"
+    return 1
+  fi
+  if ! grep -q 'SCRIPT_VERSION=' "$tmp" 2>/dev/null; then
+    error "В файле нет SCRIPT_VERSION"
     rm -f "$tmp"
     return 1
   fi
@@ -5302,7 +5256,7 @@ menu_opera_hidden() {
   if [ ! -f "$dest" ]; then
     info "Скачивание menu-opera.sh..."
     mkdir -p "$(dirname "$dest")" 2>/dev/null || true
-    if ! download_file "$MENU_OPERA_URL" "$dest"; then
+    if ! download_file "$MENU_OPERA_URL" "$dest" sh min=2000; then
       error "Не удалось скачать: $MENU_OPERA_URL"
       return 1
     fi
