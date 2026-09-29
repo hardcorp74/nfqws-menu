@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.7.4"
+SCRIPT_VERSION="0.7.6"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -96,8 +96,8 @@ ui_apply_lang() {
     ru)
       UI_UTF8=1
       RUN_MARK=" ⚡"
-      UPD_MARK=" *"
-      LBL_UPD_LEGEND="* — доступна новая версия"
+      UPD_MARK=" ⭡"
+      LBL_UPD_LEGEND="⭡ — доступна новая версия"
       LBL_ARCH="Архитектура"
       LBL_INSTALLED="Установленные компоненты:"
       LBL_NONE="— ничего не установлено —"
@@ -132,8 +132,8 @@ ui_apply_lang() {
       UI_LANG="en"
       UI_UTF8=0
       RUN_MARK=" *"
-      UPD_MARK=" *"
-      LBL_UPD_LEGEND="* - a newer version is available"
+      UPD_MARK=" ⭡"
+      LBL_UPD_LEGEND="⭡ - a newer version is available"
       LBL_ARCH="Arch"
       LBL_INSTALLED="Installed:"
       LBL_NONE="-- none --"
@@ -172,7 +172,7 @@ ui_apply_lang "$(ui_detect_default_lang)"
 # --- Проверка новых версий: значения по умолчанию --------------------------
 # Метки и подпись задаёт ui_apply_lang; здесь — только то, что нужно, если
 # отрисовка случится до выбора языка.
-: "${UPD_MARK:= *}"
+: "${UPD_MARK:= ⭡}"
 : "${LBL_UPD_LEGEND:=$UPD_MARK - a newer version is available}"
 UPD_TTL="${NFQWS_MENU_UPDATE_TTL:-21600}"   # 6 ч
 UPD_REDRAW=0
@@ -5394,7 +5394,7 @@ ver_gt() {
   return 1
 }
 
-# Метка: только если на сервере НОВЕЕ, чем установлено. ASCII « *1.2.7».
+# Метка: только если на сервере НОВЕЕ, чем установлено. « ⭡1.2.7».
 upd_mark() {
   local remote installed
   remote=$(upd_remote "$1")
@@ -5403,7 +5403,8 @@ upd_mark() {
   [ -n "$installed" ] || return 0
   [ "$remote" = "$installed" ] && return 0
   ver_gt "$remote" "$installed" || return 0
-  printf '%s%s' "$UPD_MARK" "$remote"
+  # стрелка + версия на сервере зелёным
+  printf '%s%s%s%s' "$UPD_MARK" "$GREEN" "$remote" "$NC"
   return 0
 }
 
