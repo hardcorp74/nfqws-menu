@@ -4,7 +4,7 @@
 
 Репозиторий также служит хранилищем готовых **стратегий** обхода DPI, **blobs** и **lists**.
 
-- Скрипт: [`nfqws-menu.sh`](nfqws-menu.sh) (текущая версия **0.6.69**)
+- Скрипт: [`nfqws-menu.sh`](nfqws-menu.sh) (текущая версия **0.8.0**)
 - Стратегии: [`strategies/`](strategies/)
 - Hosts: [`hosts`](hosts)
 - Контрольные суммы: [`SHA256SUMS`](SHA256SUMS), [`strategies/blobs/SHA256SUMS`](strategies/blobs/SHA256SUMS)
@@ -57,35 +57,32 @@ menu
 
 1. Определяет архитектуру процессора (`aarch64` / `mipsel` / `mips` …) — с кэшированием.
 2. Показывает **только установленные** компоненты (версии и статус):
-   - пакеты NFQWS / web, usque-keenetic, tg-ws-proxy, tg-ws-proxy-rs, magitrickle;
-   - dpi-detector, awg-manager (`[+SB]` при наличии sing-box), KeenKit;
-   - другие сервисы из `/opt/etc/init.d/`;
-   - **⚡** — сервис запущен.
+   - пакеты NFQWS / web, usque-keenetic, **tg-ws-proxy-rs**, magitrickle;
+   - dpi-detector, awg-manager (`[+SB]` при наличии sing-box), KeenKit, telemt;
+   - **⚡** — сервис запущен; **⭡** — доступна более новая версия (фоновая проверка, TTL ~6 ч).
 3. Предлагает меню:
 
 ```
 [::]  КОМПОНЕНТЫ
-      1.  Установить NFQWS/NFQWS2
-      2.  Установить веб-интерфейс
+      1.  Установка NFQWS / NFQWS2
 
 [::]  СТРАТЕГИИ/СПИСКИ
-      3.  Выбор стратегии
-      4.  Обновить IPSet List
-      5.  Загрузить rkn.list (125k+ доменов)
-      6.  Обход блокировки DoT/DoH
-      7.  Смена активных fake:blob
-      8.  Обновление hosts
-      9.  Управление DoT/DoH
+      2.  Выбор стратегии
+      3.  Обновить IPSet List
+      4.  Загрузить rkn.list (125k+ доменов)
+      5.  Обход блокировки DoT/DoH
+      6.  Смена активных fake:blob
+      7.  Обновление hosts
+      8.  Управление DoT/DoH
 
 [::]  УТИЛИТЫ
       10. dpi-detector
       11. awg-manager
       12. KeenKit
-      13. TG WS Proxy Go
-      14. usque-keenetic
-      15. MagiTrickle
-      16. telemt / telemt-panel
-      17. TG WS Proxy Rust
+      13. usque-keenetic
+      14. MagiTrickle
+      15. telemt / telemt-panel
+      16. TG WS Proxy Rust
 
 [::]  СЕРВИС (S)
       77. Change language
@@ -101,42 +98,32 @@ menu
 
 ```
 Установленные компоненты:
-  nfqws2-keenetic        1.2.6 ⚡
-  nfqws-keenetic-web     3.0.23 ⚡
-  tg-ws-proxy-rs         2.4.5 ⚡ ⬆2.5.0
-  dpi-detector           5.0.0-alpha.6
-  awg-manager [+SB]      2.18.0
-  KeenKit                2.8.7
-  magitrickle            ...
-  ⬆ — доступна новая версия
+  nfqws2-keenetic        1.3.x ⚡
+  nfqws-keenetic-web     3.x ⚡
+  tg-ws-proxy-rs         2.x ⚡
+  dpi-detector           …
+  ⭡ - доступна более новая версия
 ```
-
-Версии с сервера меню проверяет **в фоне**: экран рисуется сразу, а метка `⬆` с номером новой версии появляется сама через секунду-другую. Если проверка была меньше 6 часов назад, метки видны сразу из кэша (`/opt/etc/nfqws-menu/updates.cache`) — без единого запроса; срок меняется переменной `NFQWS_MENU_UPDATE_TTL`. Проверяются только установленные компоненты, а сравнение идёт при отрисовке, поэтому после обновления метка исчезает сразу.
 
 ### 1. Установка NFQWS / NFQWS2
 
 Подменю:
 
 ```
-1) nfqws-keenetic  (версия 1)
-2) nfqws2-keenetic (версия 2)
+1) nfqws-keenetic
+2) nfqws2-keenetic
+3) nfqws-keenetic-web
+4) Установка / обновление .ipk (обход DPI)
 0) Назад
 ```
 
-- Установка зависимостей (`ca-certificates`, `wget-ssl`, удаление `wget-nossl`).
-- Добавление официального opkg-репозитория под архитектуру.
-- Установка пакета; при установке v2, если уже стоит v1 — предложение удалить старый пакет.
+- **1–2** — зависимости (`ca-certificates`, `wget-ssl`), официальный opkg-репозиторий под архитектуру, установка пакета; при v2, если стоит v1 — предложение удалить старый пакет. После установки — предложение поставить веб.
+- **3** — веб-интерфейс (lighttpd + PHP, порт **90**): `http://<IP-роутера>:90`, логин/пароль Entware (`root` / `keenetic` по умолчанию).
+- **4** — прямая установка **.ipk** (обход DPI): версии с github.io, скачивание с GitHub Releases → ghproxy → github.io, затем `opkg install` локального файла (конфиги при необходимости извлекаются из .ipk).
 
-> Фикс TLS reasm с **NFQWS2 ≥ 1.3.1** входит в официальный пакет — отдельный патч бинарника в меню больше не нужен.
+> Фикс TLS reasm с **NFQWS2 ≥ 1.3.1** входит в официальный пакет.
 
-### 2. Установка веб-интерфейса
-
-Устанавливает `nfqws-keenetic-web` (lighttpd + PHP на порту **90**).
-
-- Адрес: `http://<IP-роутера>:90`
-- Логин/пароль — учётные данные Entware (по умолчанию `root` / `keenetic`).
-
-### 3. Установка стратегии
+### 2. Выбор стратегии
 
 - Если ни одна версия NFQWS не установлена — предлагает установить.
 - Показывает список `.conf` из:
@@ -173,7 +160,7 @@ menu
 
 После всех шагов соответствующий сервис перезапускается.
 
-### 4. Обновление IPSet List
+### 3. Обновление IPSet List
 
 Скачивает актуальный IP/CIDR-список из\
 [Flowseal/zapret-discord-youtube](https://github.com/Flowseal/zapret-discord-youtube)\
@@ -186,7 +173,7 @@ menu
 
 Бэкап, очистка пустых строк/комментариев, перезапуск сервиса. При двух установленных версиях — можно обновить обе.
 
-### 5. Загрузить rkn.list (125k+ доменов)
+### 4. Загрузить rkn.list (125k+ доменов)
 
 Доступно при установленном **nfqws-keenetic** (v1) и/или **nfqws2-keenetic** (v2). При обеих версиях — выбор: 1 / 2 / обе.
 
@@ -199,13 +186,13 @@ menu
 - Добавляет `--hostlist=…/rkn.list` в `MODE_LIST` соответствующего конфига (с бэкапом), если его ещё нет. Вставка через **awk** (устойчиво к CRLF, пробелам, пустым кавычкам).
 - **Перезапуск** сервиса (`S51nfqws` / `S51nfqws2`) только при реальных изменениях (обновлён список и/или изменён `MODE_LIST`). Если hostlist уже был в конфиге и список не обновляли — перезапуск не выполняется.
 
-### 6. Обход блокировки DoT/DoH
+### 5. Обход блокировки DoT/DoH
 
 Только при установленном **nfqws2-keenetic**.
 
 Добавляет в `NFQWS_ARGS_CUSTOM` стратегию обхода блокировок публичных DoT/DoH DNS (Cloudflare, Google, AdGuard, NextDNS, Quad9 и др.), при необходимости добавляет порт `853` в `TCP_PORTS` / `UDP_PORTS`, перезапускает `S51nfqws2`.
 
-### 7. Смена активных fake:blob
+### 6. Смена активных fake:blob
 
 Позволяет заменить используемые в конфиге `fake:blob=NAME` на другой `.bin`-файл (переназначает путь в `--blob=NAME:…`).
 
@@ -215,7 +202,7 @@ menu
 - При выборе файла из репозитория — скачивает его, обновляет `--blob=…`, бэкап конфига.
 - Перезапуск сервиса — по подтверждению (по умолчанию Да).
 
-### 8. Обновление hosts
+### 7. Обновление hosts
 
 Запись статических DNS-привязок на стороне **Keenetic** через `ndmc` (`ip host DOMAIN IP` / `no ip host DOMAIN` + сохранение конфигурации).
 
@@ -226,7 +213,7 @@ menu
 - Предупреждение, если уникальных записей **&gt; 64** (лимит Keenetic `ip host`).
 - Нужен `ndmc` (только Keenetic / Netcraze OS).
 
-### 9. Управление DoT/DoH
+### 8. Управление DoT/DoH
 
 Управление DNS-over-TLS / DNS-over-HTTPS на стороне **Keenetic** через `ndmc`.
 
@@ -297,26 +284,7 @@ curl -sL https://raw.githubusercontent.com/rndnaame/awg-compressed/main/install-
 - Есть `/opt/keenkit.sh` — **сразу запускает**.
 - Иначе — установщик [KeenKit](https://github.com/spatiumstas/KeenKit).
 
-### 13. TG WS Proxy Go
-
-Локальный MTProto-прокси для Telegram Desktop, который ускоряет работу Telegram, перенаправляя трафик через WebSocket-соединения. Данные передаются в том же зашифрованном виде, а для работы не нужны сторонние серверы.
-
-Это Go-реализация; Rust-версия — отдельным пунктом **17**.
-
-Установка / обновление [tg-ws-proxy](https://github.com/spatiumstas/tg-ws-proxy-go):
-
-- Уже установлен → `opkg update && opkg upgrade tg-ws-proxy`
-- Не установлен → репозиторий feedly + `opkg install tg-ws-proxy`
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/spatiumstas/feedly/main/add-repo.sh | sh
-opkg install tg-ws-proxy
-```
-
-Конфиги: `/opt/etc/tg-ws-proxy/config.conf`, `secret.conf`\
-Init: `/opt/etc/init.d/S99tg-ws-proxy` (start / stop / status / restart)
-
-### 14. usque-keenetic
+### 13. usque-keenetic
 
 Адаптация неофициального клиента Cloudflare WARP с режимом MASQUE для роутеров Keenetic / Netcraze.
 
@@ -341,7 +309,7 @@ opkg install usque-keenetic
 IFACE="opkgtun0"
 ```
 
-### 15. MagiTrickle
+### 14. MagiTrickle
 
 Утилита для точечной маршрутизации сетевого трафика по заданным доменным именам.
 
@@ -352,7 +320,7 @@ IFACE="opkgtun0"
 - Init: `/opt/etc/init.d/S99magitrickle` (start | stop | restart | status)
 - Удаление — в п. 88 (с опциональным удалением `/opt/etc/opkg/magitrickle.conf`)
 
-### 16. telemt / telemt-panel
+### 15. telemt / telemt-panel
 
 Telegram MTProto-прокси на Rust (полная реализация официального алгоритма + расширения). Скрипты: [augin/telemt_script](https://github.com/augin/telemt_script) (Entware / Keenetic, рекомендуется **aarch64**).
 
@@ -380,11 +348,11 @@ Telegram MTProto-прокси на Rust (полная реализация оф�
 | 2 | **Dropbear fix** — скрипт `sw.ext.io/ent/_addons/dropbear_fix` (с опцией сброса пароля root или без) |
 | U | **Обновить все пакеты** — `opkg update && opkg upgrade` (также клавиша **U** из главного меню) |
 
-### 17. TG WS Proxy Rust (tg-ws-proxy-rs)
+### 16. TG WS Proxy Rust (tg-ws-proxy-rs)
 
-[tg-ws-proxy-rs](https://github.com/valnesfjord/tg-ws-proxy-rs) — тот же прокси на Rust. В opkg его нет: ставит его штатный `install.sh` проекта, он же пишет конфиг и Entware-инициализацию. Меню добавляет к установке:
+[tg-ws-proxy-rs](https://github.com/valnesfjord/tg-ws-proxy-rs) — MTProto-прокси на Rust. В opkg его нет: ставит штатный `install.sh` проекта, он же пишет конфиг и Entware-инициализацию. Меню добавляет:
 
-- **секрет и порт прежней Go-установки** — ссылки `tg://` у клиентов не меняются, Go-сервис останавливается и снимается с автозапуска;
+- **секрет и порт прежней Go-установки** (если осталась) — ссылки `tg://` не меняются, Go-сервис останавливается и снимается с автозапуска;
 - **выбор сборки** — обычная или компактная (UPX), таблицей: размер на флеше и потребление памяти. По умолчанию обычная; компактная — когда флеш-памяти мало (образ распаковывается в ОЗУ и не вытесняется);
 - **подбор параметров по замерам** — CF-домены и варианты лестницы проверяются штатной пробой бинаря, затем выводится список с временем каждого, и путь выбираете вы (Enter — быстрейший);
 - **проверка связи до выдачи ссылки** — `resPQ` от DC Telegram, то есть вся цепочка, а не «порт открыт».
@@ -394,7 +362,7 @@ Init: `/opt/etc/init.d/S99tg-ws-proxy-rs` (start / stop / status / restart)
 
 Проба есть с версии **2.4.5**; у более старого бинаря меню предложит обновиться.
 
-Секрет меню переносит из Go-установки, до установки Rust-версии — тогда ссылки `tg://` у клиентов не меняются. Если секрета нет ни в Go-установке, ни в конфиге Rust-версии, его создаёт `install.sh` проекта и печатает ссылку в лог; меню показывает её оттуда.
+Секрет меню пишет само, до установки: генератор секрета в `install.sh` проекта использует `od -An`, которого BusyBox не знает, и на боксе без готового секрета установка падает. Если секрет остался от Go-версии, переносится он — тогда ссылки клиентов не меняются.
 
 ### 77. Change language
 
@@ -407,7 +375,7 @@ Init: `/opt/etc/init.d/S99tg-ws-proxy-rs` (start / stop / status / restart)
 ```
 Удаление:
   [N] nfqws2-keenetic / nfqws-keenetic-web / dpi-detector /
-      awg-manager / tg-ws-proxy / usque-keenetic /
+      awg-manager / tg-ws-proxy-rs / usque-keenetic /
       magitrickle / opera-proxy / KeenKit / telemt
   [a] Удалить все пакеты NFQWS
   [b] Удалить резервные копии (.bak.* / *-opkg)
@@ -417,7 +385,7 @@ Init: `/opt/etc/init.d/S99tg-ws-proxy-rs` (start / stop / status / restart)
 - Пакеты NFQWS — `opkg remove --autoremove`
 - **dpi-detector** — бинарник (`/opt/bin/dpi-detector` и др.)
 - **awg-manager** — `opkg remove` + `rm -rf /opt/etc/awg-manager`
-- **tg-ws-proxy** — `opkg remove` + запрос на удаление `/opt/etc/opkg/feedly.conf`
+- **tg-ws-proxy-rs** — бинарь, init, конфиги
 - **usque-keenetic** — `opkg remove --autoremove` + `/opt/etc/opkg/usque-keenetic.conf`
 - **magitrickle** — `opkg remove` + запрос на удаление `/opt/etc/opkg/magitrickle.conf`
 - **KeenKit** — удаление `/opt/keenkit.sh`
@@ -431,6 +399,13 @@ Init: `/opt/etc/init.d/S99tg-ws-proxy-rs` (start / stop / status / restart)
 ---
 
 ## Changelog
+
+### 0.7.0 – 0.8.0
+
+- **Нумерация меню** — единый п. **1** (NFQWS / NFQWS2 / web / .ipk); стратегии/списки **2–8**; утилиты **10–16** (без TG WS Proxy Go)
+- **п. 1 → 4** — установка `.ipk` напрямую (GitHub Releases / ghproxy / github.io) при блокировке opkg-репозитория
+- **Проверка обновлений** — фоновый опрос (меню, tg-ws-proxy-rs, dpi-detector, awg-manager…); метка **⭡** в статусе и заголовке; TTL ~6 ч (`NFQWS_MENU_UPDATE_TTL`)
+- **TG WS Proxy Go** убран из меню (остаётся миграция секрета/порта при установке Rust)
 
 ### 0.6.69
 
@@ -530,12 +505,12 @@ Init: `/opt/etc/init.d/S99tg-ws-proxy-rs` (start / stop / status / restart)
 - **п. 7** — смена активных **fake:blob** (локальные + из репозитория)
 - **п. 8** — **Обновление hosts** через `ndmc`
 - **п. 15** — **MagiTrickle** (установка/обновление/удаление)
-- **п. 16** — **telemt / telemt-panel**
+- **п. 15** — **telemt / telemt-panel**; **п. 16** — **TG WS Proxy Rust**
 - **S / U** — UPX, Dropbear fix, opkg upgrade
-- **п. 9** (бывш. 6) — Управление DoT/DoH: пресеты Xbox-DNS / NullsProxy / Supercell и др.
+- **п. 8** — Управление DoT/DoH: пресеты Xbox-DNS / NullsProxy / Supercell и др.
 - **SHA256** blobs + список стратегий из SUMS; CDN/offline-кэш; fallback через VPN-туннели
-- Нумерация: 5 = rkn.list, 6 = DoT/DoH bypass, 7 = fake:blob, 8 = hosts, 9 = Manage DoT/DoH, 16 = telemt
-- Статус: magitrickle / telemt; удаление в п. 88
+- Нумерация (0.8.x): 1 = install, 2–8 = стратегии/списки, 10–16 = утилиты
+- Статус: magitrickle / telemt / tg-ws-proxy-rs; метка **⭡** при новой версии
 - Без принудительного `export LD_LIBRARY_PATH` (совместимость ndmc / Entware wget)
 - Обычный `read` в меню (без `stty` / принудительного erase)
 
