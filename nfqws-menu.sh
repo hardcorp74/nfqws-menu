@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.8.3"
+SCRIPT_VERSION="0.8.4"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -769,7 +769,9 @@ detect_arch() {
   if [ -z "$ARCH" ]; then
     ARCH_RAW=$(_arch_from_opkg_conf /opt/etc/opkg.conf)
     ARCH=$(_arch_normalize "$ARCH_RAW")
-    [ -n "$ARCH" ] && warn "opkg print-architecture пуст/ошибка; ARCH из /opt/etc/opkg.conf: $ARCH_RAW → $ARCH"
+    if [ -n "$ARCH" ]; then
+      info "opkg print-architecture недоступен — ARCH из /opt/etc/opkg.conf: $ARCH ($ARCH_RAW)"
+    fi
   fi
 
   # 3) uname -m только если оба источника молчат; семейство mips — НЕ берём
