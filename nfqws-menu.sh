@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.8.6"
+SCRIPT_VERSION="0.8.8"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -718,7 +718,59 @@ _arch_pick_best() {
   '
 }
 
+# opkg занят (lock / другой процесс) — не блокируем меню
+opkg_is_busy() {
+  [ -f /opt/tmp/opkg.lock ] && return 0
+  [ -f /opt/var/lock/opkg.lock ] && return 0
+  [ -f /var/lock/opkg.lock ] && return 0
+  [ -f /tmp/opkg.lock ] && return 0
+  if command -v pidof >/dev/null 2>&1; then
+    pidof opkg >/dev/null 2>&1 && return 0
+  fi
+  # [o]pkg — не ловим сам grep
+  ps w 2>/dev/null | grep -q '[o]pkg' && return 0
+  return 1
+}
+
+# opkg с таймаутом (сек). При busy/timeout — пустой stdout, код 1.
+# Использование: opkg_cmd_timeout 5 list-installed
+opkg_cmd_timeout() {
+  local sec="${1:-3}" out pid i
+  shift
+  [ "$#" -ge 1 ] || return 1
+  if opkg_is_busy; then
+    return 1
+  fi
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$sec" opkg "$@" 2>/dev/null
+    return $?
+  fi
+  # BusyBox без timeout: фон + ожидание
+  out="/tmp/nfqws-opkg-$$.out"
+  ( opkg "$@" >"$out" 2>/dev/null ) &
+  pid=$!
+  i=0
+  while [ "$i" -lt "$sec" ]; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      wait "$pid" 2>/dev/null
+      cat "$out" 2>/dev/null
+      rm -f "$out"
+      return 0
+    fi
+    sleep 1
+    i=$((i + 1))
+  done
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  rm -f "$out"
+  return 1
+}
+
 _arch_from_opkg() {
+  # без timeout: print-architecture быстрый; при lock opkg_is_busy → conf
+  if opkg_is_busy; then
+    return 0
+  fi
   opkg print-architecture 2>/dev/null | _arch_pick_best
 }
 
@@ -861,7 +913,11 @@ PROC_CACHE=""
 PORT90_CACHE=""
 
 refresh_opkg_cache() {
-  OPKG_INSTALLED_CACHE=$(opkg list-installed 2>/dev/null)
+  # Не блокируем меню, если opkg держит lock (update/install)
+  if opkg_is_busy; then
+    return 0
+  fi
+  OPKG_INSTALLED_CACHE=$(opkg_cmd_timeout 5 list-installed 2>/dev/null || true)
 }
 
 refresh_proc_cache() {
