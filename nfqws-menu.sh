@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.8.4"
+SCRIPT_VERSION="0.8.5"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -677,10 +677,14 @@ backup_file() {
 }
 
 # ---------------------------------------------------------------------------
-# Архитектура (кэш)
+# Архитектура / модель (кэш)
 # ---------------------------------------------------------------------------
 ARCH=""
 ARCH_RAW=""
+ARCH_SOURCE=""   # opkg | conf | uname | ""
+ROUTER_MODEL=""
+RCI_CHECKED=0
+RCI_HAS_NF_KMOD=""  # 1=есть opkg-kmod-netfilter в components, 0=нет, ""=RCI недоступен
 
 # Нормализация сырого идентификатора → ARCH (mipsel|mips|aarch64|x86_64|x86).
 # Пустой результат = не распознано. mipsel* / mipselsf* проверяются ДО mips*.
@@ -698,7 +702,6 @@ _arch_normalize() {
 }
 
 # Лучшая строка «arch NAME PRIORITY» из stdin (opkg print-architecture или opkg.conf).
-# Не-all, max priority; бонус mipsel*/aarch64* над «голым» mips.
 _arch_pick_best() {
   awk '
     $1 == "arch" && $2 != "" && $2 != "all" {
@@ -714,29 +717,21 @@ _arch_pick_best() {
   '
 }
 
-# 1) opkg print-architecture
 _arch_from_opkg() {
   opkg print-architecture 2>/dev/null | _arch_pick_best
 }
 
-# 2) /opt/etc/opkg.conf — строки arch … и URL src/gz (mipselsf-k3.4, aarch64-k3.10, …)
-#    Пример:
-#      src/gz entware http://bin.entware.net/mipselsf-k3.4
-#      arch mipsel-3.4 150
-#      arch mipsel-3.4_kn 200
+# /opt/etc/opkg.conf — arch … или URL src/gz (mipselsf-k3.4, aarch64-k3.10, …)
 _arch_from_opkg_conf() {
   local conf="${1:-/opt/etc/opkg.conf}" line name from_url=""
   [ -f "$conf" ] || return 0
 
-  # Сначала явные arch (как у print-architecture)
   name=$(grep -E '^[[:space:]]*arch[[:space:]]+' "$conf" 2>/dev/null | _arch_pick_best)
   if [ -n "$name" ]; then
     printf '%s\n' "$name"
     return 0
   fi
 
-  # Иначе — путь репозитория Entware в src/gz
-  # mipselsf-k3.4 | mipssf-k3.4 | aarch64-k3.10 | x64-k3.2 | …
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
       src/gz*|src\ *)
@@ -753,64 +748,100 @@ _arch_from_opkg_conf() {
   [ -n "$from_url" ] && printf '%s\n' "$from_url"
 }
 
+# RCI show/version: модель + наличие opkg-kmod-netfilter (один раз за сессию)
+_rci_fetch() {
+  local json
+  [ "$RCI_CHECKED" = "1" ] && return 0
+  RCI_CHECKED=1
+  json=$(curl -s --connect-timeout 2 --max-time 3 "http://127.0.0.1:79/rci/show/version" 2>/dev/null) \
+    || json=$(wget -qO- -T 3 "http://127.0.0.1:79/rci/show/version" 2>/dev/null) \
+    || json=""
+  [ -n "$json" ] || return 0
+
+  ROUTER_MODEL=$(printf '%s' "$json" | sed -n 's/.*"model"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+  if printf '%s' "$json" | grep -q 'opkg-kmod-netfilter'; then
+    RCI_HAS_NF_KMOD=1
+  else
+    RCI_HAS_NF_KMOD=0
+  fi
+}
+
+# Строка статуса: [ Архитектура: aarch64 ] [ Модель: … ]
+# ARCH зелёный, если из opkg; жёлтый — из opkg.conf / uname.
+print_arch_line() {
+  local arch_col model_part
+  case "$ARCH_SOURCE" in
+    opkg) arch_col="$GREEN" ;;
+    conf|uname) arch_col="$YELLOW" ;;
+    *) arch_col="$DIM" ;;
+  esac
+  if [ -n "$ARCH" ]; then
+    printf '[ %s: %s%s%s ]' "$LBL_ARCH" "$arch_col" "$ARCH" "$NC"
+  else
+    printf '[ %s: %s—%s ]' "$LBL_ARCH" "$DIM" "$NC"
+  fi
+  if [ -n "$ROUTER_MODEL" ]; then
+    printf ' [ Модель: %s ]' "$ROUTER_MODEL"
+  fi
+  printf '\n'
+  if [ "$RCI_HAS_NF_KMOD" = "0" ]; then
+    warn "Через web-интерфейс Keenetic/Netcraze установить пакет «Модули ядра подсистемы Netfilter» (OPKG → Kernel modules for Netfilter)."
+  fi
+}
+
 detect_arch() {
   local um cand
 
-  if [ -n "$ARCH" ]; then
-    info "$LBL_ARCH: $ARCH ($ARCH_RAW)"
+  # Уже определено — только перерисовать строку (RCI кэшируется)
+  if [ -n "$ARCH" ] || [ -n "$ARCH_SOURCE" ]; then
+    _rci_fetch
+    print_arch_line
     return 0
   fi
 
-  # 1) opkg print-architecture — основной источник (uname/RCI на mipsel врут).
+  # 1) opkg print-architecture
   ARCH_RAW=$(_arch_from_opkg)
   ARCH=$(_arch_normalize "$ARCH_RAW")
+  [ -n "$ARCH" ] && ARCH_SOURCE="opkg"
 
-  # 2) /opt/etc/opkg.conf — arch-строки или URL bin.entware.net/…
+  # 2) /opt/etc/opkg.conf
   if [ -z "$ARCH" ]; then
     ARCH_RAW=$(_arch_from_opkg_conf /opt/etc/opkg.conf)
     ARCH=$(_arch_normalize "$ARCH_RAW")
-    if [ -n "$ARCH" ]; then
-      info "opkg print-architecture недоступен — ARCH из /opt/etc/opkg.conf: $ARCH ($ARCH_RAW)"
-    fi
+    [ -n "$ARCH" ] && ARCH_SOURCE="conf"
   fi
 
-  # 3) uname -m только если оба источника молчат; семейство mips — НЕ берём
+  # 3) uname -m (mips* не берём — на Keenetic врёт)
   if [ -z "$ARCH" ]; then
     um=$(uname -m 2>/dev/null || true)
     case "$um" in
-      mips|mipsel|mips64|mips64el)
-        warn "opkg и opkg.conf не дали ARCH; uname -m=$um на Keenetic ненадёжен (mipsel → mips)."
-        ;;
-      "")
-        ;;
+      mips|mipsel|mips64|mips64el|"") ;;
       *)
         cand=$(_arch_normalize "$um")
         if [ -n "$cand" ]; then
           ARCH="$cand"
           ARCH_RAW="$um"
-          warn "opkg/opkg.conf пусты; взято из uname -m: $um → $ARCH"
+          ARCH_SOURCE="uname"
         fi
         ;;
     esac
   fi
 
-  # 4) всё ещё пусто — меню работает; arch-репо / .ipk — через need_arch
-  if [ -z "$ARCH" ]; then
-    warn "Архитектура не определена (opkg: '${ARCH_RAW:-—}', conf/uname см. выше)."
-    warn "Меню продолжит работу; установка NFQWS/usque по ARCH будет недоступна."
-    return 0
-  fi
+  [ -z "$ARCH_SOURCE" ] && ARCH_SOURCE="none"
 
-  info "$LBL_ARCH: $ARCH ($ARCH_RAW)"
+  _rci_fetch
+  print_arch_line
+
+  if [ -z "$ARCH" ]; then
+    warn "ARCH не определена — установка NFQWS/usque по архитектуре может быть недоступна."
+  fi
   return 0
 }
 
-# Требуется ARCH для arch-специфичных репозиториев / .ipk
 need_arch() {
   [ -z "$ARCH" ] && detect_arch
   if [ -z "$ARCH" ]; then
     error "Нужна архитектура: opkg print-architecture или /opt/etc/opkg.conf (uname/RCI на mipsel врут)."
-    error "Сейчас: ARCH_RAW='${ARCH_RAW:-—}', uname=$(uname -m 2>/dev/null || echo —)"
     return 1
   fi
   return 0
