@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.8.5"
+SCRIPT_VERSION="0.8.6"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -683,6 +683,7 @@ ARCH=""
 ARCH_RAW=""
 ARCH_SOURCE=""   # opkg | conf | uname | ""
 ROUTER_MODEL=""
+ROUTER_TITLE=""  # title из RCI, напр. 5.1.5
 RCI_CHECKED=0
 RCI_HAS_NF_KMOD=""  # 1=есть opkg-kmod-netfilter в components, 0=нет, ""=RCI недоступен
 
@@ -759,6 +760,7 @@ _rci_fetch() {
   [ -n "$json" ] || return 0
 
   ROUTER_MODEL=$(printf '%s' "$json" | sed -n 's/.*"model"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+  ROUTER_TITLE=$(printf '%s' "$json" | sed -n 's/.*"title"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
   if printf '%s' "$json" | grep -q 'opkg-kmod-netfilter'; then
     RCI_HAS_NF_KMOD=1
   else
@@ -766,24 +768,28 @@ _rci_fetch() {
   fi
 }
 
-# Строка статуса: [ Архитектура: aarch64 ] [ Модель: … ]
-# ARCH зелёный, если из opkg; жёлтый — из opkg.conf / uname.
+# Строка под заголовком: Модель: WR3000P (KN-3811) 5.1.5 aarch64
+# ARCH зелёный из opkg, жёлтый из opkg.conf / uname.
 print_arch_line() {
-  local arch_col model_part
+  local arch_col
   case "$ARCH_SOURCE" in
     opkg) arch_col="$GREEN" ;;
     conf|uname) arch_col="$YELLOW" ;;
     *) arch_col="$DIM" ;;
   esac
-  if [ -n "$ARCH" ]; then
-    printf '[ %s: %s%s%s ]' "$LBL_ARCH" "$arch_col" "$ARCH" "$NC"
-  else
-    printf '[ %s: %s—%s ]' "$LBL_ARCH" "$DIM" "$NC"
-  fi
+
+  printf 'Модель:'
   if [ -n "$ROUTER_MODEL" ]; then
-    printf ' [ Модель: %s ]' "$ROUTER_MODEL"
+    printf ' %s' "$ROUTER_MODEL"
+  else
+    printf ' %s—%s' "$DIM" "$NC"
+  fi
+  [ -n "$ROUTER_TITLE" ] && printf ' %s' "$ROUTER_TITLE"
+  if [ -n "$ARCH" ]; then
+    printf ' %s%s%s' "$arch_col" "$ARCH" "$NC"
   fi
   printf '\n'
+
   if [ "$RCI_HAS_NF_KMOD" = "0" ]; then
     warn "Через web-интерфейс Keenetic/Netcraze установить пакет «Модули ядра подсистемы Netfilter» (OPKG → Kernel modules for Netfilter)."
   fi
