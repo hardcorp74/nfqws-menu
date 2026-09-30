@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.8.0"
+SCRIPT_VERSION="0.8.3"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -682,24 +682,136 @@ backup_file() {
 ARCH=""
 ARCH_RAW=""
 
+# Нормализация сырого идентификатора → ARCH (mipsel|mips|aarch64|x86_64|x86).
+# Пустой результат = не распознано. mipsel* / mipselsf* проверяются ДО mips*.
+_arch_normalize() {
+  case "$1" in
+    aarch64*|arm64*)                    echo "aarch64" ;;
+    # 32-bit ARM: в репозиториях nfqws обычно нет отдельной ветки
+    armv7*|armv6*|arm*)                 echo "" ;;
+    mipsel*|mipselsf*|mips64el*)        echo "mipsel" ;;
+    mips*|mipssf*)                      echo "mips" ;;
+    x86_64*|amd64*|x64*)                echo "x86_64" ;;
+    i[3-6]86*|x86*|i686*)               echo "x86" ;;
+    *)                                  echo "" ;;
+  esac
+}
+
+# Лучшая строка «arch NAME PRIORITY» из stdin (opkg print-architecture или opkg.conf).
+# Не-all, max priority; бонус mipsel*/aarch64* над «голым» mips.
+_arch_pick_best() {
+  awk '
+    $1 == "arch" && $2 != "" && $2 != "all" {
+      p = $3 + 0
+      n = $2
+      bonus = 0
+      if (n ~ /^mipsel/ || n ~ /^mipselsf/ || n ~ /^mips64el/) bonus = 2
+      else if (n ~ /^aarch64/ || n ~ /^arm64/) bonus = 2
+      score = p * 10 + bonus
+      if (score > best) { best = score; name = n }
+    }
+    END { if (name != "") print name }
+  '
+}
+
+# 1) opkg print-architecture
+_arch_from_opkg() {
+  opkg print-architecture 2>/dev/null | _arch_pick_best
+}
+
+# 2) /opt/etc/opkg.conf — строки arch … и URL src/gz (mipselsf-k3.4, aarch64-k3.10, …)
+#    Пример:
+#      src/gz entware http://bin.entware.net/mipselsf-k3.4
+#      arch mipsel-3.4 150
+#      arch mipsel-3.4_kn 200
+_arch_from_opkg_conf() {
+  local conf="${1:-/opt/etc/opkg.conf}" line name from_url=""
+  [ -f "$conf" ] || return 0
+
+  # Сначала явные arch (как у print-architecture)
+  name=$(grep -E '^[[:space:]]*arch[[:space:]]+' "$conf" 2>/dev/null | _arch_pick_best)
+  if [ -n "$name" ]; then
+    printf '%s\n' "$name"
+    return 0
+  fi
+
+  # Иначе — путь репозитория Entware в src/gz
+  # mipselsf-k3.4 | mipssf-k3.4 | aarch64-k3.10 | x64-k3.2 | …
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      src/gz*|src\ *)
+        case "$line" in
+          *mipselsf*|*mips64el*) from_url="mipselsf"; break ;;
+          *mipssf*)              from_url="mipssf"; break ;;
+          *aarch64*|*arm64*)     from_url="aarch64"; break ;;
+          */x64*|*x86_64*)       from_url="x86_64"; break ;;
+          */x86*|*i386*)         from_url="x86"; break ;;
+        esac
+        ;;
+    esac
+  done < "$conf"
+  [ -n "$from_url" ] && printf '%s\n' "$from_url"
+}
+
 detect_arch() {
+  local um cand
+
   if [ -n "$ARCH" ]; then
     info "$LBL_ARCH: $ARCH ($ARCH_RAW)"
     return 0
   fi
-  ARCH_RAW=$(opkg print-architecture 2>/dev/null | sort -k3 -nr | awk '$2!="all"{print $2;exit}')
-  case "$ARCH_RAW" in
-    aarch64*|arm*) ARCH="aarch64" ;;
-    mipsel*)       ARCH="mipsel"  ;;
-    mips*)         ARCH="mips"    ;;
-    x86_64*|amd64) ARCH="x86_64"  ;;
-    x86*)          ARCH="x86"     ;;
-    *)
-      error "Unknown arch: $ARCH_RAW"
-      exit 1
-      ;;
-  esac
+
+  # 1) opkg print-architecture — основной источник (uname/RCI на mipsel врут).
+  ARCH_RAW=$(_arch_from_opkg)
+  ARCH=$(_arch_normalize "$ARCH_RAW")
+
+  # 2) /opt/etc/opkg.conf — arch-строки или URL bin.entware.net/…
+  if [ -z "$ARCH" ]; then
+    ARCH_RAW=$(_arch_from_opkg_conf /opt/etc/opkg.conf)
+    ARCH=$(_arch_normalize "$ARCH_RAW")
+    [ -n "$ARCH" ] && warn "opkg print-architecture пуст/ошибка; ARCH из /opt/etc/opkg.conf: $ARCH_RAW → $ARCH"
+  fi
+
+  # 3) uname -m только если оба источника молчат; семейство mips — НЕ берём
+  if [ -z "$ARCH" ]; then
+    um=$(uname -m 2>/dev/null || true)
+    case "$um" in
+      mips|mipsel|mips64|mips64el)
+        warn "opkg и opkg.conf не дали ARCH; uname -m=$um на Keenetic ненадёжен (mipsel → mips)."
+        ;;
+      "")
+        ;;
+      *)
+        cand=$(_arch_normalize "$um")
+        if [ -n "$cand" ]; then
+          ARCH="$cand"
+          ARCH_RAW="$um"
+          warn "opkg/opkg.conf пусты; взято из uname -m: $um → $ARCH"
+        fi
+        ;;
+    esac
+  fi
+
+  # 4) всё ещё пусто — меню работает; arch-репо / .ipk — через need_arch
+  if [ -z "$ARCH" ]; then
+    warn "Архитектура не определена (opkg: '${ARCH_RAW:-—}', conf/uname см. выше)."
+    warn "Меню продолжит работу; установка NFQWS/usque по ARCH будет недоступна."
+    return 0
+  fi
+
   info "$LBL_ARCH: $ARCH ($ARCH_RAW)"
+  return 0
+}
+
+# Требуется ARCH для arch-специфичных репозиториев / .ipk
+need_arch() {
+  [ -z "$ARCH" ] && detect_arch
+  if [ -z "$ARCH" ]; then
+    error "Нужна архитектура: opkg print-architecture или /opt/etc/opkg.conf (uname/RCI на mipsel врут)."
+    error "Сейчас: ARCH_RAW='${ARCH_RAW:-—}', uname=$(uname -m 2>/dev/null || echo —)"
+    return 1
+  fi
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -982,6 +1094,7 @@ ask_web_install() {
 }
 
 install_nfqws1() {
+  need_arch || return 1
   info "Установка nfqws-keenetic (версия 1)..."
   install_deps
   ensure_opkg_repo "nfqws-keenetic" "https://nfqws.github.io/nfqws-keenetic/$ARCH"
@@ -991,6 +1104,7 @@ install_nfqws1() {
 }
 
 install_nfqws2() {
+  need_arch || return 1
   info "Установка nfqws2-keenetic (версия 2)..."
   if is_installed "nfqws-keenetic"; then
     warn "Обнаружен nfqws-keenetic. Рекомендуется удалить его перед установкой nfqws2."
@@ -1267,7 +1381,7 @@ install_ipk_from_repo() {
 menu_install_ipk_direct() {
   local v1="?" v2="?" vweb="?" base1 base2 baseweb meta choice
 
-  [ -z "$ARCH" ] && detect_arch
+  need_arch || return 1
 
   base1="https://nfqws.github.io/nfqws-keenetic/${ARCH}"
   base2="https://nfqws.github.io/nfqws2-keenetic/${ARCH}"
@@ -4238,7 +4352,7 @@ remove_tg_ws_proxy_rs() {
 menu_usque_keenetic() {
   echo
   info "usque-keenetic"
-  [ -z "$ARCH" ] && detect_arch
+  need_arch || return 1
 
   if is_installed "usque-keenetic"; then
     opkg_install_or_upgrade usque-keenetic
