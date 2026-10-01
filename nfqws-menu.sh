@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.6"
+SCRIPT_VERSION="0.9.7"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -2668,16 +2668,16 @@ update_rkn_list() {
 
   if [ "$skip_download" -eq 0 ]; then
     info "Скачивание rkn.list (zapret4rocket, ~2 МБ) ..."
-    # Большой файл: сначала зеркала (часто быстрее при DPI), увеличенный таймаут
+    # Сначала GitHub raw; зеркала — если raw недоступен (DPI)
     local _old_max="$CURL_MAX_TIME" _old_wget="$WGET_TIMEOUT" _ok=0 _u
     CURL_MAX_TIME="${CURL_MAX_TIME_LARGE:-180}"
     WGET_TIMEOUT="$CURL_MAX_TIME"
     for _u in \
-      "$RKN_LIST_MIRROR_URL" \
+      "$RKN_LIST_URL" \
       "https://cdn.jsdelivr.net/gh/IndeecFOX/zapret4rocket@master/extra_strats/TCP/RKN/List.txt" \
       "https://fastly.jsdelivr.net/gh/IndeecFOX/zapret4rocket@master/extra_strats/TCP/RKN/List.txt" \
       "https://ghproxy.net/https://raw.githubusercontent.com/IndeecFOX/zapret4rocket/master/extra_strats/TCP/RKN/List.txt" \
-      "$RKN_LIST_URL"
+      "$RKN_LIST_MIRROR_URL"
     do
       [ -n "$_u" ] || continue
       info "URL: $_u"
