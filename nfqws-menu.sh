@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.8"
+SCRIPT_VERSION="0.9.9"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -5662,7 +5662,7 @@ upd_menu_version() {
   return 1
 }
 
-# Тег последнего релиза из редиректа releases/latest: без GitHub API и jsonfilter.
+# Тег последнего стабильного релиза из редиректа releases/latest (без pre-release).
 upd_release_tag() {   # $1 = owner/repo
   local url alt loc
   command -v curl >/dev/null 2>&1 || return 1
@@ -5675,6 +5675,24 @@ upd_release_tag() {   # $1 = owner/repo
         return 0
         ;;
     esac
+  done
+  return 1
+}
+
+# Новейший релиз включая pre-release (API releases?per_page=1).
+# Нужен для dpi-detector: все теги — prerelease, /releases/latest пустой.
+upd_release_tag_any() {   # $1 = owner/repo
+  local repo="$1" url json tag
+  command -v curl >/dev/null 2>&1 || return 1
+  for url in \
+    "https://api.github.com/repos/${repo}/releases?per_page=1" \
+    "https://ghproxy.net/https://api.github.com/repos/${repo}/releases?per_page=1"
+  do
+    json=$(curl -fsS -m 10 -H 'Accept: application/vnd.github+json' "$url" 2>/dev/null) || continue
+    tag=$(printf '%s' "$json" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+    [ -n "$tag" ] || continue
+    printf '%s' "$tag" | sed 's/^v//'
+    return 0
   done
   return 1
 }
@@ -5701,7 +5719,8 @@ upd_check_bg() {
     [ -n "$ver" ] && printf 'tg-ws-proxy-rs %s\n' "$ver" >> "$tmp"
   fi
   if is_dpi_detector_installed; then
-    ver=$(upd_release_tag "Runnin4ik/dpi-detector" 2>/dev/null) || ver=""
+    # все релизы dpi-detector — pre-release; /releases/latest их не видит
+    ver=$(upd_release_tag_any "Runnin4ik/dpi-detector" 2>/dev/null) || ver=""
     [ -n "$ver" ] && printf 'dpi-detector %s\n' "$ver" >> "$tmp"
   fi
   if is_awg_manager_installed; then
