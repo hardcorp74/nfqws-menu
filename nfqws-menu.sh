@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.8.9"
+SCRIPT_VERSION="0.9.0"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -929,14 +929,34 @@ refresh_proc_cache() {
   PROC_CACHE=$(ps w 2>/dev/null || ps 2>/dev/null || true)
 }
 
+# Без fork: shell-цикл по кэшу
 is_installed() {
+  local line pref
   [ -n "$OPKG_INSTALLED_CACHE" ] || refresh_opkg_cache
-  printf '%s\n' "$OPKG_INSTALLED_CACHE" | grep -q "^$1 "
+  pref="$1 - "
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      "$pref"*) return 0 ;;
+    esac
+  done <<EOF
+$OPKG_INSTALLED_CACHE
+EOF
+  return 1
 }
 
+# Без grep/sed/head — один shell-цикл по кэшу
 pkg_version() {
+  local line pref
   [ -n "$OPKG_INSTALLED_CACHE" ] || refresh_opkg_cache
-  printf '%s\n' "$OPKG_INSTALLED_CACHE" | grep "^$1 - " | head -1 | sed "s/^$1 - //"
+  pref="$1 - "
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      "$pref"*) printf '%s\n' "${line#"$pref"}"; return 0 ;;
+    esac
+  done <<EOF
+$OPKG_INSTALLED_CACHE
+EOF
+  return 1
 }
 
 port_is_open() {
@@ -961,17 +981,25 @@ port_is_open() {
 proc_running() {
   local name="$1"
   [ -n "$PROC_CACHE" ] || refresh_proc_cache
-  # -- и -F: имя может начинаться с '-' (Sxx-xxx → svc=-xxx) → иначе grep видит опцию
-  printf '%s\n' "$PROC_CACHE" | grep -qF -- "$name"
+  # substring в кэше ps — без fork (имена сервисов достаточно уникальны)
+  case "$PROC_CACHE" in
+    *"$name"*) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
-# Как proc_running, но имя команды должно совпасть целиком: tg-ws-proxy-rs
-# содержит "tg-ws-proxy" подстрокой, и поиск фиксированной строки даёт ложный ⚡
-# у Go-сборки, когда запущена Rust.
+# Целое имя команды: tg-ws-proxy ≠ tg-ws-proxy-rs
 proc_running_exact() {
-  local name="$1"
+  local name="$1" line
   [ -n "$PROC_CACHE" ] || refresh_proc_cache
-  printf '%s\n' "$PROC_CACHE" | grep -qE "(^|[ /])${name}( |\$)"
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      *"/$name "*|*"/$name"|*" $name "*|*" $name") return 0 ;;
+    esac
+  done <<EOF
+$PROC_CACHE
+EOF
+  return 1
 }
 
 # kind → «запущен?» (по процессу / порту)
@@ -1019,8 +1047,10 @@ print_tool_info() {
   return 0
 }
 
+# Один awk: OPKG + PROC + UPD → готовые строки статуса (минимум fork на MIPS)
 show_installed() {
-  local shown=0
+  local shown=0 out web_up=0 has_sb=0
+  local extras="" rs_ver dpi_ver kk_ver
   PORT90_CACHE=""
   refresh_opkg_cache
   refresh_proc_cache
@@ -1028,84 +1058,221 @@ show_installed() {
   echo
   printf '%s\n' "${BOLD}${LBL_INSTALLED}${NC}"
 
-  print_pkg_info "nfqws-keenetic"     "nfqws"       && shown=1
-  print_pkg_info "nfqws2-keenetic"    "nfqws2"      && shown=1
-  print_pkg_info "nfqws-keenetic-web" "web"         && shown=1
-  print_pkg_info "usque-keenetic"     "usque"       && shown=1
-  if is_tg_ws_proxy_rs_installed; then
-    local rs_ver
-    rs_ver=$(tg_ws_proxy_rs_version)
-    print_tool_info "tg-ws-proxy-rs" "${rs_ver:-ok}" "tg-ws-proxy-rs"
-    shown=1
-  fi
-  print_pkg_info "magitrickle"        "magitrickle" && shown=1
+  # port 90 / sing-box — один раз
+  port_is_open 90 && web_up=1
+  { [ -x /opt/etc/awg-manager/singbox/sing-box ] || [ -f /opt/etc/awg-manager/singbox/sing-box ]; } && has_sb=1
 
-  if is_dpi_detector_installed; then
-    local dpi_ver
-    dpi_ver=$(dpi_detector_version 2>/dev/null) || dpi_ver=""
-    print_tool_info "dpi-detector" "${dpi_ver:-ok}"
-    shown=1
+  # Внешние tool-версии (не из opkg) — до awk
+  if [ -x "${TG_WS_PROXY_RS_BIN:-/opt/bin/tg-ws-proxy-rs}" ]; then
+    rs_ver=$(tg_ws_proxy_rs_version 2>/dev/null) || rs_ver="ok"
+    extras="${extras}tool|tg-ws-proxy-rs|${rs_ver:-ok}|tg-ws-proxy-rs
+"
   fi
-
-  if is_installed "awg-manager" || [ -d /opt/etc/awg-manager ]; then
-    local awg_info="ok"
-    if is_installed "awg-manager"; then
-      awg_info=$(pkg_version awg-manager)
-      [ -z "$awg_info" ] && awg_info="ok"
-    fi
-    if [ -x /opt/etc/awg-manager/singbox/sing-box ] || [ -f /opt/etc/awg-manager/singbox/sing-box ]; then
-      awg_info="${awg_info} [+SB]"
-    fi
-    print_tool_info "awg-manager" "$awg_info" "awg"
-    shown=1
+  if [ -x /opt/bin/dpi-detector ] || command -v dpi-detector >/dev/null 2>&1; then
+    dpi_ver=$(dpi_detector_version 2>/dev/null) || dpi_ver="ok"
+    extras="${extras}tool|dpi-detector|${dpi_ver:-ok}|
+"
   fi
-
   if [ -f /opt/keenkit.sh ]; then
-    local kk_ver
-    kk_ver=$(grep -E '^SCRIPT_VERSION=' /opt/keenkit.sh 2>/dev/null | head -1 | \
-      sed -n 's/^SCRIPT_VERSION=["'\'']\([^"'\'']*\)["'\''].*/\1/p')
-    print_tool_info "KeenKit" "${kk_ver:-ok}"
-    shown=1
+    kk_ver=$(sed -n 's/^SCRIPT_VERSION=["'\'']\([^"'\'']*\)["'\''].*/\1/p' /opt/keenkit.sh 2>/dev/null | head -1)
+    extras="${extras}tool|KeenKit|${kk_ver:-ok}|
+"
   fi
-
   if [ -x /opt/usr/bin/telemt ] || [ -x /opt/etc/init.d/S99telemt ] || [ -d /opt/etc/telemt ]; then
-    print_tool_info "telemt" "ok" "telemt"
-    shown=1
+    extras="${extras}tool|telemt|ok|telemt
+"
   fi
   if [ -x /opt/sbin/telemt-panel ] || [ -x /opt/etc/init.d/S99telemt-panel ] || [ -d /opt/etc/telemt-panel ]; then
-    print_tool_info "telemt-panel" "ok" "telemt-panel"
-    shown=1
+    extras="${extras}tool|telemt-panel|ok|telemt-panel
+"
   fi
-
-  # Прочие S* init-скрипты (не дублируем уже показанные)
+  # awg без opkg-пакета, но с каталогом
+  if [ -d /opt/etc/awg-manager ]; then
+    extras="${extras}awgdir
+"
+  fi
+  # список S* init (имена сервисов)
   if [ -d /opt/etc/init.d ]; then
-    local f base svc ver
+    local f base
     for f in /opt/etc/init.d/S[0-9][0-9]*; do
       [ -f "$f" ] && [ -x "$f" ] || continue
-      base=$(basename "$f")
-      svc=$(echo "$base" | sed 's/^S[0-9][0-9]//')
-      [ -n "$svc" ] || continue
-      case "$svc" in
-        nfqws|nfqws2|lighttpd|usque|tg-ws-proxy|tg-ws-proxy-rs|magitrickle|telemt|telemt-panel) continue ;;
-        awg-manager)
-          is_installed "awg-manager" || [ -d /opt/etc/awg-manager ] && continue
-          ;;
-      esac
-      ver=$(pkg_version "$svc")
-      if proc_running "$svc"; then
-        printf '  %s%-22s%s %s%s\n' "$GREEN" "$svc" "$NC" "${ver:-}" "$RUN_MARK"
-      else
-        printf '  %s%-22s%s %s\n' "$GREEN" "$svc" "$NC" "${ver:-}"
-      fi
-      shown=1
+      base=${f##*/}
+      # S99name → name (BusyBox: ${var#S[0-9][0-9]} может не сработать — sed fallback)
+      base=$(printf '%s' "$base" | sed 's/^S[0-9][0-9]//')
+      [ -n "$base" ] || continue
+      extras="${extras}init|${base}
+"
     done
   fi
 
-  if [ "$shown" -eq 0 ]; then
-    printf '  %s%s%s\n' "$DIM" "$LBL_NONE" "$NC"
-  fi
+  out=$(
+    WEB_UP="$web_up" HAS_SB="$has_sb" \
+    G="$GREEN" N="$NC" R="${RUN_MARK}" U="${UPD_MARK}" D="$DIM" \
+    awk -v none="$LBL_NONE" '
+    function ver_gt(a, b,   i, na, nb, xa, xb, ca, cb) {
+      if (a == "" || b == "" || a == b) return 0
+      na = split(a, A, /[^0-9A-Za-z]+/)
+      nb = split(b, B, /[^0-9A-Za-z]+/)
+      for (i = 1; i <= na || i <= nb; i++) {
+        xa = (i <= na) ? A[i] : "0"
+        xb = (i <= nb) ? B[i] : "0"
+        if (xa ~ /^[0-9]+$/ && xb ~ /^[0-9]+$/) {
+          ca = xa + 0; cb = xb + 0
+          if (ca > cb) return 1
+          if (ca < cb) return 0
+        } else {
+          if (xa > xb) return 1
+          if (xa < xb) return 0
+        }
+      }
+      return 0
+    }
+    function row(name, ver, mark,   s) {
+      s = sprintf("  %s%-22s%s %s%s", G, name, N, ver, mark)
+      print s
+      shown++
+    }
+    function mark_run(on) { return on ? R : "" }
+    function mark_upd(pkg, local,   rem) {
+      rem = remote[pkg]
+      if (rem == "" || local == "" || rem == local) return ""
+      if (ver_gt(rem, local)) return U G rem N
+      return ""
+    }
+    function proc_has(s) { return index(PROC, s) > 0 }
+    function proc_exact(s,   n, a, i, f) {
+      # слово /s или space s space/end
+      n = split(PROC, a, "\n")
+      for (i = 1; i <= n; i++) {
+        if (a[i] ~ "(^|[ /])" s "( |$)") return 1
+      }
+      return 0
+    }
+
+    BEGIN {
+      section = "opkg"
+      shown = 0
+      G = ENVIRON["G"]; N = ENVIRON["N"]; R = ENVIRON["R"]
+      U = ENVIRON["U"]; D = ENVIRON["D"]
+      WEB_UP = ENVIRON["WEB_UP"] + 0
+      HAS_SB = ENVIRON["HAS_SB"] + 0
+    }
+    /^---PROC---$/ { section = "proc"; next }
+    /^---UPD---$/  { section = "upd";  next }
+    /^---EXTRA---$/ { section = "extra"; next }
+    section == "opkg" {
+      if ($0 ~ /^[^ ]+ - /) {
+        pkg = $1
+        ver = $0
+        sub(/^[^ ]+ - /, "", ver)
+        opkg[pkg] = ver
+      }
+      next
+    }
+    section == "proc" { PROC = PROC $0 "\n"; next }
+    section == "upd" {
+      if ($1 != "" && $1 != "checked") {
+        rem = $0; sub(/^[^ ]+ /, "", rem)
+        remote[$1] = rem
+      }
+      next
+    }
+    section == "extra" {
+      if ($0 == "awgdir") { awgdir = 1; next }
+      if ($0 ~ /^tool\|/) {
+        n = split($0, t, "|")
+        # tool|name|ver|kind
+        tname = t[2]; tver = t[3]; tkind = t[4]
+        tools[tname] = tver
+        tkind_of[tname] = tkind
+        next
+      }
+      if ($0 ~ /^init\|/) {
+        svc = substr($0, 6)
+        if (svc != "") inits[svc] = 1
+        next
+      }
+      next
+    }
+    END {
+      # --- основные opkg-пакеты ---
+      if ("nfqws-keenetic" in opkg) {
+        m = mark_run(proc_has("nfqws")) mark_upd("nfqws-keenetic", opkg["nfqws-keenetic"])
+        row("nfqws-keenetic", opkg["nfqws-keenetic"], m)
+      }
+      if ("nfqws2-keenetic" in opkg) {
+        m = mark_run(proc_has("nfqws2")) mark_upd("nfqws2-keenetic", opkg["nfqws2-keenetic"])
+        row("nfqws2-keenetic", opkg["nfqws2-keenetic"], m)
+      }
+      if ("nfqws-keenetic-web" in opkg) {
+        m = mark_run(WEB_UP || proc_has("lighttpd")) mark_upd("nfqws-keenetic-web", opkg["nfqws-keenetic-web"])
+        row("nfqws-keenetic-web", opkg["nfqws-keenetic-web"], m)
+      }
+      if ("usque-keenetic" in opkg) {
+        m = mark_run(proc_has("usque")) mark_upd("usque-keenetic", opkg["usque-keenetic"])
+        row("usque-keenetic", opkg["usque-keenetic"], m)
+      }
+      # tools (tg-ws, dpi, keenkit, telemt)
+      if ("tg-ws-proxy-rs" in tools) {
+        m = mark_run(proc_has("tg-ws-proxy-rs")) mark_upd("tg-ws-proxy-rs", tools["tg-ws-proxy-rs"])
+        row("tg-ws-proxy-rs", tools["tg-ws-proxy-rs"], m)
+      }
+      if ("magitrickle" in opkg) {
+        m = mark_run(proc_has("magitrickle")) mark_upd("magitrickle", opkg["magitrickle"])
+        row("magitrickle", opkg["magitrickle"], m)
+      }
+      if ("dpi-detector" in tools) {
+        m = mark_upd("dpi-detector", tools["dpi-detector"])
+        row("dpi-detector", tools["dpi-detector"], m)
+      }
+      # awg-manager
+      if (("awg-manager" in opkg) || awgdir) {
+        aver = ("awg-manager" in opkg) ? opkg["awg-manager"] : "ok"
+        if (HAS_SB) aver = aver " [+SB]"
+        up = proc_has("awg-manager") || proc_has("amneziawg") || (HAS_SB && proc_has("sing-box"))
+        m = mark_run(up) mark_upd("awg-manager", ("awg-manager" in opkg) ? opkg["awg-manager"] : "")
+        row("awg-manager", aver, m)
+      }
+      if ("KeenKit" in tools) row("KeenKit", tools["KeenKit"], "")
+      if ("telemt" in tools) {
+        m = mark_run(proc_has("telemt"))
+        row("telemt", tools["telemt"], m)
+      }
+      if ("telemt-panel" in tools) {
+        m = mark_run(proc_has("telemt-panel"))
+        row("telemt-panel", tools["telemt-panel"], m)
+      }
+
+      # прочие init.d
+      skip["nfqws"]=1; skip["nfqws2"]=1; skip["lighttpd"]=1; skip["usque"]=1
+      skip["tg-ws-proxy"]=1; skip["tg-ws-proxy-rs"]=1; skip["magitrickle"]=1
+      skip["telemt"]=1; skip["telemt-panel"]=1
+      if (("awg-manager" in opkg) || awgdir) skip["awg-manager"]=1
+      for (svc in inits) {
+        if (svc in skip) continue
+        ver = (svc in opkg) ? opkg[svc] : ""
+        m = mark_run(proc_has(svc))
+        row(svc, ver, m)
+      }
+
+      if (shown == 0) printf "  %s%s%s\n", D, none, N
+    }
+    ' <<EOF
+$OPKG_INSTALLED_CACHE
+---PROC---
+$PROC_CACHE
+---UPD---
+$( [ -f "${UPD_CACHE:-}" ] && cat "$UPD_CACHE" 2>/dev/null )
+---EXTRA---
+$extras
+EOF
+  )
+  printf '%s\n' "$out"
   echo
 }
+
+# print_pkg_info / print_tool_info остаются для других мест меню
+
 
 # ---------------------------------------------------------------------------
 # Выбор версии NFQWS (1 / 2 / both) — общий для strategy и ipset
