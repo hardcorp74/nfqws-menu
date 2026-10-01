@@ -400,6 +400,26 @@ Init: `/opt/etc/init.d/S99tg-ws-proxy-rs` (start / stop / status / restart)
 
 ## Changelog
 
+### 0.9.0 – 0.9.9
+
+- **Блок «Установленные компоненты» переписан** — один awk-проход вместо десятков grep/sed/head на кадр меню; `is_installed` / `pkg_version` / `proc_running` — shell-циклы по кэшу без fork'ов; удалены неиспользуемые `print_pkg_info` / `print_tool_info`; на MIPS отрисовка заметно быстрее (0.9.0–0.9.1)
+- **Очистка списков** — хелпер `_list_file_clean` (один awk вместо grep|sed|grep, срезает и `\r` из CRLF); переменная/файл `cleaned` убраны из ipset/hostlist-функций (0.9.5)
+- **opkg без блокировок** — список пакетов читается напрямую из `/opt/lib/opkg/status` (запасной путь `/usr/lib/opkg/status`), без вызова `opkg` и без зависимости от lock; удалены `opkg_is_busy` / `opkg_cmd_timeout` и fallback на `opkg list-installed` (0.9.2–0.9.3)
+- **Парсер status** — учитываются только блоки `Status: … installed`; устранён ложный ⭡ при residual-записях `not-installed` со старыми версиями (0.9.4)
+- **ts-фулинг** — после применения стратегии с `--dpi-desync-fooling=ts` или `tcp_ts` выводится предупреждение про включение меток времени RFC 1323 на Windows (`netsh interface tcp set global timestamps=enabled`) (0.9.6)
+- **rkn.list** — порядок источников: GitHub raw → jsDelivr/Fastly → ghproxy → зеркало mizulina (последним) (0.9.7)
+- **TTL проверки обновлений** — 10 минут (600 с), по-прежнему переопределяется через `NFQWS_MENU_UPDATE_TTL` (0.9.8)
+- **dpi-detector** — проверка обновлений через `upd_release_tag_any` (API `releases?per_page=1`, включает pre-release): `/releases/latest` не видит теги вида `v5.0.0-alpha.N` (0.9.9)
+
+### 0.8.0 – 0.8.9
+
+- **Зеркала GitHub** — порядок загрузки изменён на «оригинал → fastly → jsDelivr → ghproxy» (мёртвый ghproxy больше не первым); таймауты: connect 5 с, max 25 с (180 с только для крупных файлов); вывод «Пробуем: <url>» при скачивании install.sh (0.8.0)
+- **download_sh_validated** — общий хелпер: перебирает все зеркала и туннели, проверяет размер/shebang/`sh -n` — битый источник даёт переход к следующему, а не «успех + crash» (0.7.8 → закреплено в 0.8.x)
+- **Определение ARCH** — трёхступенчатое: `opkg print-architecture` → разбор `/opt/etc/opkg.conf` (arch-приоритеты, src/gz-URL: `mipselsf-k3.4` → mipsel и т.п.) → `uname -m` (для mips/mipsel не используется) (0.8.3–0.8.4)
+- **Шапка меню** — `[ Архитектура: … ] [ Модель: … ]`: модель из RCI (`127.0.0.1:79/rci/show/version`, кэш на сессию), ARCH зелёный из opkg / жёлтый из conf; предупреждение установить «Модули ядра подсистемы Netfilter», если пакет `opkg-kmod-netfilter` отсутствует (0.8.5–0.8.6)
+- **Без зависаний при занятом opkg** — busy определяется по реальному процессу (pidof); `print-architecture` всегда, `list-installed` с timeout 8 с (0.8.8–0.8.9)
+- **Стратегии/списки** — обновлены `krushaaa.conf` (новые blob-пути и аргументы), добавлены записи BattlEye в hosts, конфиги hostlists (0.8.1–0.8.2)
+
 ### 0.7.0 – 0.8.0
 
 - **Нумерация меню** — единый п. **1** (NFQWS / NFQWS2 / web / .ipk); стратегии/списки **2–8**; утилиты **10–16** (без TG WS Proxy Go)
