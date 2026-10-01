@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.3"
+SCRIPT_VERSION="0.9.4"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -861,6 +861,7 @@ PROC_CACHE=""
 PORT90_CACHE=""
 
 # Список установленных из /opt/lib/opkg/status (без вызова opkg, без lock).
+# Только Status «… installed» (не «not-installed» — старые residual-записи).
 # Формат строк: «name - version».
 refresh_opkg_cache() {
   local status="/opt/lib/opkg/status"
@@ -870,21 +871,28 @@ refresh_opkg_cache() {
     return 0
   fi
   OPKG_INSTALLED_CACHE=$(awk '
+    function flush() {
+      # « installed» есть у installed; у not-installed пробела перед installed нет
+      if (ok && pkg != "" && ver != "") print pkg " - " ver
+      pkg = ""; ver = ""; ok = 0
+    }
     /^Package:[[:space:]]*/ {
+      flush()
       pkg = $0
       sub(/^Package:[[:space:]]*/, "", pkg)
       next
     }
     /^Version:[[:space:]]*/ {
-      if (pkg != "") {
-        ver = $0
-        sub(/^Version:[[:space:]]*/, "", ver)
-        print pkg " - " ver
-      }
-      pkg = ""
+      ver = $0
+      sub(/^Version:[[:space:]]*/, "", ver)
       next
     }
-    /^$/ { pkg = "" }
+    /^Status:[[:space:]]*/ {
+      ok = ($0 ~ / installed/)
+      next
+    }
+    /^$/ { flush() }
+    END { flush() }
   ' "$status" 2>/dev/null) || OPKG_INSTALLED_CACHE=""
 }
 
