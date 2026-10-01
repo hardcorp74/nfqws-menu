@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.8.8"
+SCRIPT_VERSION="0.8.9"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -718,26 +718,33 @@ _arch_pick_best() {
   '
 }
 
-# opkg занят (lock / другой процесс) — не блокируем меню
+# Реально запущенный процесс opkg (не lock-файл и не grep по «opkg» в cmdline —
+# иначе ложные срабатывания: пути /opt/etc/opkg, stale lock → жёлтый ARCH и пустой list-installed).
 opkg_is_busy() {
-  [ -f /opt/tmp/opkg.lock ] && return 0
-  [ -f /opt/var/lock/opkg.lock ] && return 0
-  [ -f /var/lock/opkg.lock ] && return 0
-  [ -f /tmp/opkg.lock ] && return 0
   if command -v pidof >/dev/null 2>&1; then
     pidof opkg >/dev/null 2>&1 && return 0
+    return 1
   fi
-  # [o]pkg — не ловим сам grep
-  ps w 2>/dev/null | grep -q '[o]pkg' && return 0
-  return 1
+  # точное имя команды opkg в ps (не substring)
+  ps w 2>/dev/null | awk '
+    NR==1 { next }
+    {
+      # $5 или дальше — COMMAND; ищем слово opkg
+      for (i = 1; i <= NF; i++) {
+        if ($i == "opkg" || $i ~ /\/opkg$/) { found = 1; exit }
+      }
+    }
+    END { exit !found }
+  '
 }
 
-# opkg с таймаутом (сек). При busy/timeout — пустой stdout, код 1.
+# opkg с таймаутом (сек). Только для долгих команд (list-installed).
 # Использование: opkg_cmd_timeout 5 list-installed
 opkg_cmd_timeout() {
-  local sec="${1:-3}" out pid i
+  local sec="${1:-5}" out pid i rc
   shift
   [ "$#" -ge 1 ] || return 1
+  # Если идёт install/update — не ждём lock минутами
   if opkg_is_busy; then
     return 1
   fi
@@ -745,7 +752,6 @@ opkg_cmd_timeout() {
     timeout "$sec" opkg "$@" 2>/dev/null
     return $?
   fi
-  # BusyBox без timeout: фон + ожидание
   out="/tmp/nfqws-opkg-$$.out"
   ( opkg "$@" >"$out" 2>/dev/null ) &
   pid=$!
@@ -753,9 +759,10 @@ opkg_cmd_timeout() {
   while [ "$i" -lt "$sec" ]; do
     if ! kill -0 "$pid" 2>/dev/null; then
       wait "$pid" 2>/dev/null
+      rc=$?
       cat "$out" 2>/dev/null
       rm -f "$out"
-      return 0
+      return "$rc"
     fi
     sleep 1
     i=$((i + 1))
@@ -767,10 +774,7 @@ opkg_cmd_timeout() {
 }
 
 _arch_from_opkg() {
-  # без timeout: print-architecture быстрый; при lock opkg_is_busy → conf
-  if opkg_is_busy; then
-    return 0
-  fi
+  # без timeout и без pre-check busy: print-architecture обычно мгновенный
   opkg print-architecture 2>/dev/null | _arch_pick_best
 }
 
@@ -913,11 +917,12 @@ PROC_CACHE=""
 PORT90_CACHE=""
 
 refresh_opkg_cache() {
-  # Не блокируем меню, если opkg держит lock (update/install)
+  # При реальном install/update — не блокируем меню (кэш может остаться прежним/пустым)
   if opkg_is_busy; then
     return 0
   fi
-  OPKG_INSTALLED_CACHE=$(opkg_cmd_timeout 5 list-installed 2>/dev/null || true)
+  # timeout только здесь: list-installed на слабых mips иногда долгий
+  OPKG_INSTALLED_CACHE=$(opkg_cmd_timeout 8 list-installed 2>/dev/null || true)
 }
 
 refresh_proc_cache() {
@@ -5710,9 +5715,8 @@ main_menu() {
     clear 2>/dev/null || true
     echo
     printf '%s\n' "${BOLD}${BLUE}========================================${NC}"
-    printf '%s\n' "${BOLD}${BLUE}     NFQWS-MENU (Entware)  v${SCRIPT_VERSION}$(upd_mark menu)${NC}"
+    printf '%s\n' "${BOLD}${BLUE}    NFQWS-MENU (Entware)  v${SCRIPT_VERSION}$(upd_mark menu)${NC}"
     printf '%s\n' "${BOLD}${BLUE}========================================${NC}"
-    echo
     detect_arch
     show_installed
     upd_legend
