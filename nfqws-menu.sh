@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.10"
+SCRIPT_VERSION="0.9.11"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -5809,9 +5809,33 @@ upd_legend() {
 
 # Чтение выбора с оглядкой на фоновую проверку. READ_RC: 0 — ввод получен,
 # 1 — перерисовать (пришла проверка), 2 — stdin закрыт (меню завершается).
+# На BusyBox/ash USR1 часто НЕ прерывает блокирующий read — поэтому на TTY
+# крутим read -t 1 и сами смотрим UPD_REDRAW (перерисовка без Enter).
 read_choice() {
+  local _var="$1"
   READ_RC=0
-  read_menu "$1" && return 0
+  if [ -t 0 ]; then
+    while true; do
+      if [ "$UPD_REDRAW" = 1 ]; then
+        UPD_REDRAW=0
+        READ_RC=1
+        return 1
+      fi
+      # timeout 1 с: 0 = строка введена; иначе таймаут/сигнал → снова цикл
+      if read -r -t 1 "$_var" 2>/dev/null; then
+        return 0
+      fi
+      if [ "$UPD_REDRAW" = 1 ]; then
+        UPD_REDRAW=0
+        READ_RC=1
+        return 1
+      fi
+    done
+  fi
+  # не TTY (pipe/скрипт): обычный блокирующий read
+  if read_menu "$_var"; then
+    return 0
+  fi
   if [ "$UPD_REDRAW" = 1 ]; then
     UPD_REDRAW=0
     READ_RC=1
