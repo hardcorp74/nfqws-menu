@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.4"
+SCRIPT_VERSION="0.9.5"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -2364,20 +2364,32 @@ IPSET_FLOWSEAL_URL="https://raw.githubusercontent.com/Flowseal/zapret-discord-yo
 IPSET_NFQWS1_URL="https://raw.githubusercontent.com/nfqws/nfqws-keenetic/master/etc/nfqws/ipset.list"
 IPSET_NFQWS2_URL="https://raw.githubusercontent.com/nfqws/nfqws2-keenetic/master/etc/nfqws2/lists/ipset.list"
 
-# Скачать URL → cleaned; выставляет count. 0=ok, 1=ошибка.
+# Санитизация hostlist/ipset: без #/; пустых, хвостовых пробелов и \r (CRLF).
+# $1=src $2=dest → count. 0=ok, 1=пусто/ошибка.
+_list_file_clean() {
+  local src="$1" dest="$2"
+  awk '!/^[[:space:]]*([#;]|$)/ {
+    gsub(/[ \t\r]+$/, "")
+    if ($0 != "") print
+  }' "$src" > "$dest" 2>/dev/null || true
+  count=$(wc -l < "$dest" 2>/dev/null | tr -d ' ')
+  [ -n "$count" ] && [ "$count" != "0" ]
+}
+
+# Скачать URL → tmp (очищенный in-place). Выставляет count. 0=ok, 1=ошибка.
 _ipset_fetch_clean() {
-  local url="$1" tmp="$2" cleaned="$3"
+  local url="$1" tmp="$2"
   info "URL: $url"
   if ! download_file "$url" "$tmp"; then
     error "Не удалось скачать список."
     return 1
   fi
-  grep -vE '^[[:space:]]*(#|;|$)' "$tmp" | sed 's/[[:space:]]*$//' | grep -vE '^$' > "$cleaned" || true
-  count=$(wc -l < "$cleaned" 2>/dev/null | tr -d ' ')
-  if [ -z "$count" ] || [ "$count" = "0" ]; then
+  if ! _list_file_clean "$tmp" "${tmp}.clean"; then
     error "Скачанный файл пуст или не содержит записей."
+    rm -f "$tmp" "${tmp}.clean"
     return 1
   fi
+  mv -f "${tmp}.clean" "$tmp"
   info "Записей в списке: $count"
   return 0
 }
@@ -2385,9 +2397,8 @@ _ipset_fetch_clean() {
 update_ipset_list() {
   need_nfqws_installed || return
 
-  local choice tmp cleaned count src_label
+  local choice tmp count src_label
   tmp="/tmp/nfqws-ipset-$$.txt"
-  cleaned="/tmp/nfqws-ipset-clean-$$.txt"
 
   echo
   printf '%s\n' "${RED}${BOLD}⚠ ОСТОРОЖНО${NC}"
@@ -2414,7 +2425,7 @@ update_ipset_list() {
     dir=$(dirname "$dest")
     mkdir -p "$dir"
     backup_file "$dest"
-    cp "$cleaned" "$dest"
+    cp "$tmp" "$dest"
     info "Записано: $dest ($count строк)"
   }
 
@@ -2443,12 +2454,12 @@ update_ipset_list() {
   if [ "$choice" = "1" ]; then
     src_label="Flowseal/zapret-discord-youtube"
     info "Скачивание IPSet с $src_label ..."
-    if ! _ipset_fetch_clean "$IPSET_FLOWSEAL_URL" "$tmp" "$cleaned"; then
-      rm -f "$tmp" "$cleaned"
+    if ! _ipset_fetch_clean "$IPSET_FLOWSEAL_URL" "$tmp"; then
+      rm -f "$tmp"
       return 1
     fi
     apply_and_restart
-    rm -f "$tmp" "$cleaned"
+    rm -f "$tmp"
     return 0
   fi
 
@@ -2458,8 +2469,8 @@ update_ipset_list() {
 
   case "$NFQWS_VER" in
     1)
-      if ! _ipset_fetch_clean "$IPSET_NFQWS1_URL" "$tmp" "$cleaned"; then
-        rm -f "$tmp" "$cleaned"
+      if ! _ipset_fetch_clean "$IPSET_NFQWS1_URL" "$tmp"; then
+        rm -f "$tmp"
         return 1
       fi
       write_ipset "/opt/etc/nfqws/ipset.list"
@@ -2467,8 +2478,8 @@ update_ipset_list() {
       info "Сервис nfqws перезапущен."
       ;;
     2)
-      if ! _ipset_fetch_clean "$IPSET_NFQWS2_URL" "$tmp" "$cleaned"; then
-        rm -f "$tmp" "$cleaned"
+      if ! _ipset_fetch_clean "$IPSET_NFQWS2_URL" "$tmp"; then
+        rm -f "$tmp"
         return 1
       fi
       write_ipset "/opt/etc/nfqws2/lists/ipset.list"
@@ -2477,14 +2488,14 @@ update_ipset_list() {
       ;;
     both)
       # v1
-      if ! _ipset_fetch_clean "$IPSET_NFQWS1_URL" "$tmp" "$cleaned"; then
-        rm -f "$tmp" "$cleaned"
+      if ! _ipset_fetch_clean "$IPSET_NFQWS1_URL" "$tmp"; then
+        rm -f "$tmp"
         return 1
       fi
       write_ipset "/opt/etc/nfqws/ipset.list"
       # v2
-      if ! _ipset_fetch_clean "$IPSET_NFQWS2_URL" "$tmp" "$cleaned"; then
-        rm -f "$tmp" "$cleaned"
+      if ! _ipset_fetch_clean "$IPSET_NFQWS2_URL" "$tmp"; then
+        rm -f "$tmp"
         return 1
       fi
       write_ipset "/opt/etc/nfqws2/lists/ipset.list"
@@ -2493,7 +2504,7 @@ update_ipset_list() {
       info "Сервисы перезапущены."
       ;;
   esac
-  rm -f "$tmp" "$cleaned"
+  rm -f "$tmp"
 }
 
 # ---------------------------------------------------------------------------
@@ -2603,7 +2614,7 @@ update_rkn_list() {
   need_nfqws_installed || return
   pick_nfqws_ver 1 || return
 
-  local tmp="/tmp/nfqws-rkn-$$.txt" cleaned="/tmp/nfqws-rkn-clean-$$.txt" count
+  local tmp="/tmp/nfqws-rkn-$$.txt" count
   local skip_download=0
 
   # Проверяем существующие файлы (любая из выбранных версий)
@@ -2671,13 +2682,12 @@ update_rkn_list() {
       return 1
     fi
 
-    grep -vE '^[[:space:]]*(#|;|$)' "$tmp" | sed 's/[[:space:]]*$//' | grep -vE '^$' > "$cleaned" || true
-    count=$(wc -l < "$cleaned" 2>/dev/null | tr -d ' ')
-    if [ -z "$count" ] || [ "$count" = "0" ]; then
+    if ! _list_file_clean "$tmp" "${tmp}.clean"; then
       error "Скачанный файл пуст или не содержит записей."
-      rm -f "$tmp" "$cleaned"
+      rm -f "$tmp" "${tmp}.clean"
       return 1
     fi
+    mv -f "${tmp}.clean" "$tmp"
     info "Записей в списке: $count"
   fi
 
@@ -2692,7 +2702,7 @@ update_rkn_list() {
 
     if [ "$skip_download" -eq 0 ]; then
       mkdir -p "$(dirname "$dest")"
-      cp "$cleaned" "$dest"
+      cp "$tmp" "$dest"
       info "Записано: $dest ($count строк)"
       need_restart=1
     fi
@@ -2727,7 +2737,7 @@ update_rkn_list() {
       ;;
   esac
 
-  rm -f "$tmp" "$cleaned"
+  rm -f "$tmp"
 }
 
 # ---------------------------------------------------------------------------
