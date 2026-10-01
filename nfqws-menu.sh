@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.0"
+SCRIPT_VERSION="0.9.1"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -1027,29 +1027,11 @@ service_is_up() {
   esac
 }
 
-print_pkg_info() {
-  local name="$1" kind="$2" ver mark=""
-  is_installed "$name" || return 1
-  ver=$(pkg_version "$name")
-  [ -z "$ver" ] && ver="?"
-  service_is_up "$kind" && mark="$RUN_MARK"
-  mark="$mark$(upd_mark "$name")"
-  printf '  %s%-22s%s %s%s\n' "$GREEN" "$name" "$NC" "$ver" "$mark"
-  return 0
-}
-
-# $1=имя $2=версия/инфо [$3=kind для ⚡, опционально]
-print_tool_info() {
-  local name="$1" info="$2" kind="${3:-}" mark=""
-  [ -n "$kind" ] && service_is_up "$kind" && mark="$RUN_MARK"
-  mark="$mark$(upd_mark "$name")"
-  printf '  %s%-22s%s %s%s\n' "$GREEN" "$name" "$NC" "$info" "$mark"
-  return 0
-}
-
 # Один awk: OPKG + PROC + UPD → готовые строки статуса (минимум fork на MIPS)
+# Метки ⭡: ключи UPD_CACHE = nfqws-keenetic|nfqws2-keenetic|nfqws-keenetic-web|
+#   tg-ws-proxy-rs|dpi-detector|awg-manager (см. upd_check_bg).
 show_installed() {
-  local shown=0 out web_up=0 has_sb=0
+  local out web_up=0 has_sb=0
   local extras="" rs_ver dpi_ver kk_ver
   PORT90_CACHE=""
   refresh_opkg_cache
@@ -1133,21 +1115,13 @@ show_installed() {
       shown++
     }
     function mark_run(on) { return on ? R : "" }
-    function mark_upd(pkg, local,   rem) {
+    function mark_upd(pkg, localv,   rem) {
       rem = remote[pkg]
-      if (rem == "" || local == "" || rem == local) return ""
-      if (ver_gt(rem, local)) return U G rem N
+      if (rem == "" || localv == "" || rem == localv) return ""
+      if (ver_gt(rem, localv)) return U G rem N
       return ""
     }
     function proc_has(s) { return index(PROC, s) > 0 }
-    function proc_exact(s,   n, a, i, f) {
-      # слово /s или space s space/end
-      n = split(PROC, a, "\n")
-      for (i = 1; i <= n; i++) {
-        if (a[i] ~ "(^|[ /])" s "( |$)") return 1
-      }
-      return 0
-    }
 
     BEGIN {
       section = "opkg"
@@ -1270,9 +1244,6 @@ EOF
   printf '%s\n' "$out"
   echo
 }
-
-# print_pkg_info / print_tool_info остаются для других мест меню
-
 
 # ---------------------------------------------------------------------------
 # Выбор версии NFQWS (1 / 2 / both) — общий для strategy и ipset
