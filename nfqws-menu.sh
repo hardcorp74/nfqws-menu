@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.9"
+SCRIPT_VERSION="0.9.10"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -98,19 +98,16 @@ ui_apply_lang() {
       RUN_MARK=" ⚡"
       UPD_MARK=" ⭡"
       LBL_UPD_LEGEND="⭡ — доступна новая версия"
-      LBL_ARCH="Архитектура"
       LBL_INSTALLED="Установленные компоненты:"
       LBL_NONE="— ничего не установлено —"
       LBL_COMPONENTS="КОМПОНЕНТЫ"
       LBL_STRATEGIES="СТРАТЕГИИ/СПИСКИ"
       LBL_UTILS="УТИЛИТЫ"
       LBL_REMOVE="СЕРВИС"
-      LBL_S="Сервисные утилиты"
       LBL_S1="Сжать bin/sbin (UPX)"
       LBL_S2="Dropbear fix"
       LBL_U="Обновить все пакеты"
       LBL_1="Установка NFQWS / NFQWS2"
-      LBL_2="nfqws-keenetic-web"
       LBL_3="Выбор стратегии"
       LBL_4="Обновить IPSet List"
       LBL_5="Загрузить rkn.list (125k+ доменов)"
@@ -118,15 +115,11 @@ ui_apply_lang() {
       LBL_7="Смена активных fake:blob"
       LBL_8="Обновление hosts"
       LBL_9="Управление DoT/DoH"
-      LBL_77="Change language"
       LBL_88="Удаление пакетов"
       LBL_99="Обновить скрипт"
       LBL_00="Выход"
       LBL_PROMPT="Выберите пункт [Enter = выход]: "
       LBL_BACK="Нажмите Enter для возврата в меню..."
-      LBL_LANG_TITLE="Язык интерфейса"
-      LBL_LANG_CUR="Текущий"
-      LBL_LANG_SAVED="Язык сохранён"
       ;;
     *)
       UI_LANG="en"
@@ -134,19 +127,16 @@ ui_apply_lang() {
       RUN_MARK=" *"
       UPD_MARK=" ⭡"
       LBL_UPD_LEGEND="⭡ - a newer version is available"
-      LBL_ARCH="Arch"
       LBL_INSTALLED="Installed:"
       LBL_NONE="-- none --"
       LBL_COMPONENTS="COMPONENTS"
       LBL_STRATEGIES="STRATEGIES/LISTS"
       LBL_UTILS="UTILS"
       LBL_REMOVE="SERVICE"
-      LBL_S="Service utilities"
       LBL_S1="Compress bin/sbin (UPX)"
       LBL_S2="Dropbear fix"
       LBL_U="Upgrade all packages"
       LBL_1="Install NFQWS / NFQWS2"
-      LBL_2="nfqws-keenetic-web"
       LBL_3="Select strategy"
       LBL_4="Update IPSet List"
       LBL_5="Download rkn.list (125k+ domains)"
@@ -154,15 +144,11 @@ ui_apply_lang() {
       LBL_7="Change active fake:blob"
       LBL_8="Update hosts"
       LBL_9="Manage DoT/DoH"
-      LBL_77="Change language"
       LBL_88="Remove packages"
       LBL_99="Update this script"
       LBL_00="Exit"
       LBL_PROMPT="Select item [Enter = exit]: "
       LBL_BACK="Press Enter to return to menu..."
-      LBL_LANG_TITLE="Interface language"
-      LBL_LANG_CUR="Current"
-      LBL_LANG_SAVED="Language saved"
       ;;
   esac
 }
@@ -3127,11 +3113,6 @@ doh_servers_data() {
 EOF
 }
 
-print_dns_menu_header() {
-  # $1 = section markers: lines "N|section_title" before item N
-  :
-}
-
 add_dot_menu() {
   echo
   printf '%s\n' "${BOLD}Выбор DoT серверов (можно несколько через запятую, напр. 1,3,20):${NC}"
@@ -3786,17 +3767,6 @@ $name"
 # ---------------------------------------------------------------------------
 # 99. Обновить скрипт
 # ---------------------------------------------------------------------------
-resolve_script_path() {
-  local src=""
-  if [ -n "$SCRIPT_PATH" ] && [ -f "$SCRIPT_PATH" ]; then
-    src="$SCRIPT_PATH"
-  else
-    src=$0
-    case "$src" in /*) ;; *) src="$(pwd)/$src" ;; esac
-  fi
-  echo "$src"
-}
-
 extract_script_version() {
   grep -E '^SCRIPT_VERSION=' "$1" 2>/dev/null | head -1 | \
     sed -n 's/^SCRIPT_VERSION="\([^"]*\)".*/\1/p'
@@ -5461,21 +5431,6 @@ service_upx_compress() {
   info "Готово."
 }
 
-# Скачать HTTPS-URL в файл (curl → wget). Не pipe|sh.
-download_https_file() {
-  local url="$1" dest="$2"
-  rm -f "$dest"
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$url" -o "$dest" 2>/dev/null && [ -s "$dest" ] && return 0
-    rm -f "$dest"
-  fi
-  if command -v wget >/dev/null 2>&1; then
-    wget -qO "$dest" "$url" 2>/dev/null && [ -s "$dest" ] && return 0
-    rm -f "$dest"
-  fi
-  return 1
-}
-
 # dropbear_fix (логика sw.ext.io): правки conf/init + restart Entware dropbear.
 # Важно: stop убивает текущую SSH-сессию. Обычный фон (…&) получает SIGHUP и
 # часто не доходит до start. Делаем conf-правки сейчас, restart — через nohup/trap HUP.
@@ -5901,10 +5856,8 @@ main_menu() {
     echo "      15. telemt / telemt-panel"
     echo "      16. TG WS Proxy Rust"
     echo
-    printf '%s\n' "${CYAN}${BOLD}[::]  ${LBL_REMOVE} (S)${NC}"
-    echo "      77. $LBL_77"
+    printf '%s\n' "${CYAN}${BOLD}[::]  ${LBL_REMOVE} [${GREEN}S${CYAN}]  |  Lang: En/Ru [${GREEN}77${CYAN}]${NC}"
     echo "      88. $LBL_88"
-    echo
     echo "      99. $LBL_99"
     echo "      00. $LBL_00"
     echo
