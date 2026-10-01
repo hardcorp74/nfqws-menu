@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.7"
+SCRIPT_VERSION="0.9.8"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -174,7 +174,7 @@ ui_apply_lang "$(ui_detect_default_lang)"
 # отрисовка случится до выбора языка.
 : "${UPD_MARK:= ⭡}"
 : "${LBL_UPD_LEGEND:=$UPD_MARK - a newer version is available}"
-UPD_TTL="${NFQWS_MENU_UPDATE_TTL:-21600}"   # 6 ч
+UPD_TTL="${NFQWS_MENU_UPDATE_TTL:-600}"   # 10 мин
 UPD_REDRAW=0
 UPD_JOB=""
 MENU_PID=""
