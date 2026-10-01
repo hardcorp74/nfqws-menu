@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.2"
+SCRIPT_VERSION="0.9.3"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -718,63 +718,7 @@ _arch_pick_best() {
   '
 }
 
-# Реально запущенный процесс opkg (не lock-файл и не grep по «opkg» в cmdline —
-# иначе ложные срабатывания: пути /opt/etc/opkg, stale lock → жёлтый ARCH и пустой list-installed).
-opkg_is_busy() {
-  if command -v pidof >/dev/null 2>&1; then
-    pidof opkg >/dev/null 2>&1 && return 0
-    return 1
-  fi
-  # точное имя команды opkg в ps (не substring)
-  ps w 2>/dev/null | awk '
-    NR==1 { next }
-    {
-      # $5 или дальше — COMMAND; ищем слово opkg
-      for (i = 1; i <= NF; i++) {
-        if ($i == "opkg" || $i ~ /\/opkg$/) { found = 1; exit }
-      }
-    }
-    END { exit !found }
-  '
-}
-
-# opkg с таймаутом (сек). Только для долгих команд (list-installed).
-# Использование: opkg_cmd_timeout 5 list-installed
-opkg_cmd_timeout() {
-  local sec="${1:-5}" out pid i rc
-  shift
-  [ "$#" -ge 1 ] || return 1
-  # Если идёт install/update — не ждём lock минутами
-  if opkg_is_busy; then
-    return 1
-  fi
-  if command -v timeout >/dev/null 2>&1; then
-    timeout "$sec" opkg "$@" 2>/dev/null
-    return $?
-  fi
-  out="/tmp/nfqws-opkg-$$.out"
-  ( opkg "$@" >"$out" 2>/dev/null ) &
-  pid=$!
-  i=0
-  while [ "$i" -lt "$sec" ]; do
-    if ! kill -0 "$pid" 2>/dev/null; then
-      wait "$pid" 2>/dev/null
-      rc=$?
-      cat "$out" 2>/dev/null
-      rm -f "$out"
-      return "$rc"
-    fi
-    sleep 1
-    i=$((i + 1))
-  done
-  kill "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null || true
-  rm -f "$out"
-  return 1
-}
-
 _arch_from_opkg() {
-  # без timeout и без pre-check busy: print-architecture обычно мгновенный
   opkg print-architecture 2>/dev/null | _arch_pick_best
 }
 
@@ -916,40 +860,32 @@ OPKG_INSTALLED_CACHE=""
 PROC_CACHE=""
 PORT90_CACHE=""
 
-# Список установленных: читаем status-файл (мгновенно, без lock opkg).
-# Формат строк как у «opkg list-installed»: «name - version».
+# Список установленных из /opt/lib/opkg/status (без вызова opkg, без lock).
+# Формат строк: «name - version».
 refresh_opkg_cache() {
-  local status="" f
-  for f in /opt/lib/opkg/status /usr/lib/opkg/status /var/lib/opkg/status; do
-    [ -r "$f" ] || continue
-    status="$f"
-    break
-  done
-  if [ -n "$status" ]; then
-    OPKG_INSTALLED_CACHE=$(awk '
-      /^Package:[[:space:]]*/ {
-        pkg = $0
-        sub(/^Package:[[:space:]]*/, "", pkg)
-        next
-      }
-      /^Version:[[:space:]]*/ {
-        if (pkg != "") {
-          ver = $0
-          sub(/^Version:[[:space:]]*/, "", ver)
-          print pkg " - " ver
-        }
-        pkg = ""
-        next
-      }
-      /^$/ { pkg = "" }
-    ' "$status" 2>/dev/null) || OPKG_INSTALLED_CACHE=""
+  local status="/opt/lib/opkg/status"
+  [ -r "$status" ] || status="/usr/lib/opkg/status"
+  if [ ! -r "$status" ]; then
+    OPKG_INSTALLED_CACHE=""
     return 0
   fi
-  # Fallback, если status нет (редко)
-  if opkg_is_busy; then
-    return 0
-  fi
-  OPKG_INSTALLED_CACHE=$(opkg_cmd_timeout 8 list-installed 2>/dev/null || true)
+  OPKG_INSTALLED_CACHE=$(awk '
+    /^Package:[[:space:]]*/ {
+      pkg = $0
+      sub(/^Package:[[:space:]]*/, "", pkg)
+      next
+    }
+    /^Version:[[:space:]]*/ {
+      if (pkg != "") {
+        ver = $0
+        sub(/^Version:[[:space:]]*/, "", ver)
+        print pkg " - " ver
+      }
+      pkg = ""
+      next
+    }
+    /^$/ { pkg = "" }
+  ' "$status" 2>/dev/null) || OPKG_INSTALLED_CACHE=""
 }
 
 refresh_proc_cache() {
