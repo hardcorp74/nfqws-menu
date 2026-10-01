@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.1"
+SCRIPT_VERSION="0.9.2"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -916,12 +916,39 @@ OPKG_INSTALLED_CACHE=""
 PROC_CACHE=""
 PORT90_CACHE=""
 
+# Список установленных: читаем status-файл (мгновенно, без lock opkg).
+# Формат строк как у «opkg list-installed»: «name - version».
 refresh_opkg_cache() {
-  # При реальном install/update — не блокируем меню (кэш может остаться прежним/пустым)
+  local status="" f
+  for f in /opt/lib/opkg/status /usr/lib/opkg/status /var/lib/opkg/status; do
+    [ -r "$f" ] || continue
+    status="$f"
+    break
+  done
+  if [ -n "$status" ]; then
+    OPKG_INSTALLED_CACHE=$(awk '
+      /^Package:[[:space:]]*/ {
+        pkg = $0
+        sub(/^Package:[[:space:]]*/, "", pkg)
+        next
+      }
+      /^Version:[[:space:]]*/ {
+        if (pkg != "") {
+          ver = $0
+          sub(/^Version:[[:space:]]*/, "", ver)
+          print pkg " - " ver
+        }
+        pkg = ""
+        next
+      }
+      /^$/ { pkg = "" }
+    ' "$status" 2>/dev/null) || OPKG_INSTALLED_CACHE=""
+    return 0
+  fi
+  # Fallback, если status нет (редко)
   if opkg_is_busy; then
     return 0
   fi
-  # timeout только здесь: list-installed на слабых mips иногда долгий
   OPKG_INSTALLED_CACHE=$(opkg_cmd_timeout 8 list-installed 2>/dev/null || true)
 }
 
