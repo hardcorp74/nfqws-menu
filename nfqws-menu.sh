@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.5"
+SCRIPT_VERSION="0.9.6"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -2182,9 +2182,31 @@ apply_strategy() {
     fi
   fi
 
+  # ts-фулинг: нужен TCP timestamp на Windows
+  warn_ts_fooling "$conf_dest"
+
   echo
   service_restart "$(nfqws_init_path "$ver")"
   info "Сервис перезапущен."
+}
+
+# Предупреждение, если в конфиге --dpi-desync-fooling=ts или tcp_ts
+warn_ts_fooling() {
+  local conf="$1"
+  [ -f "$conf" ] || return 0
+  # ищем в не-комментариях
+  if ! grep -vE '^[[:space:]]*#' "$conf" 2>/dev/null | grep -qE -- '--dpi-desync-fooling=ts|tcp_ts'; then
+    return 0
+  fi
+  echo
+  printf '%s\n' "${RED}${BOLD}⚠ ВАЖНО${NC}"
+  printf '%s\n' "${RED}При использовании ts-фулинг в стратегиях нужно убедиться,${NC}"
+  printf '%s\n' "${RED}что TCP timestamp включён и работает (только для WINDOWS ОС).${NC}"
+  echo
+  printf '%s\n' "${RED}Включить метки времени RFC 1323 (CMD от администратора):${NC}"
+  echo
+  printf '%s\n' "${RED}  netsh interface tcp set global timestamps=enabled${NC}"
+  echo
 }
 
 # Метка стратегии из комментария: # general (SIMPLE FAKE ALT).bat -> nfqws2
