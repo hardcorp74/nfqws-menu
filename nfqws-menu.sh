@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.12"
+SCRIPT_VERSION="0.9.13"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -607,10 +607,16 @@ blob_expected_sha256() {
 # curl|sh отдаёт установщику stdin=pipe → интерактивное меню (awg и др.) не открывается.
 run_remote_sh() {
   local url="$1" tmp rc=0
+  # Хвосты от Ctrl+C / обрыва SSH предыдущих запусков
+  rm -f /tmp/nfqws-remote-*.sh 2>/dev/null || true
   tmp="/tmp/nfqws-remote-$$.sh"
-  rm -f "$tmp"
+  # Чистим tmp даже при SIGINT/EXIT (иначе файл остаётся в /tmp)
+  trap 'rm -f /tmp/nfqws-remote-$$.sh 2>/dev/null; [ -n "${MENU_PID:-}" ] && trap "upd_cleanup" EXIT || trap - EXIT' EXIT INT TERM
   if ! download_sh_validated "$url" "$tmp"; then
     error "Не удалось скачать целый скрипт: $url"
+    rm -f "$tmp"
+    if [ -n "${MENU_PID:-}" ]; then trap 'upd_cleanup' EXIT; else trap - EXIT; fi
+    trap - INT TERM
     return 1
   fi
   # Полный tty: stdin+stdout+stderr — иначе awg-menu / интерактив не поднимается
@@ -620,6 +626,8 @@ run_remote_sh() {
     sh "$tmp" || rc=$?
   fi
   rm -f "$tmp"
+  if [ -n "${MENU_PID:-}" ]; then trap 'upd_cleanup' EXIT; else trap - EXIT; fi
+  trap - INT TERM
   drain_stdin
   return "$rc"
 }
