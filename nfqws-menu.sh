@@ -1769,41 +1769,82 @@ iface_has_global_ipv6() {
   return $?
 }
 
+# Записать ISP_INTERFACE="…" в conf (замена или вставка в начало).
+set_isp_interface_line() {
+  local conf="$1" val="$2"
+  [ -n "$val" ] || return 0
+  if grep -qE '^ISP_INTERFACE=' "$conf" 2>/dev/null; then
+    sed -i "s|^ISP_INTERFACE=.*|ISP_INTERFACE=\"$val\"|" "$conf"
+  else
+    printf 'ISP_INTERFACE="%s"\n' "$val" | cat - "$conf" > "${conf}.new" && mv "${conf}.new" "$conf"
+  fi
+}
+
+# $1=conf  $2=опционально: ISP из конфига ДО смены стратегии (эталон для сравнения)
 fix_isp_interface() {
-  local conf="$1" detected current ipv6_val current_ipv6
+  local conf="$1" preferred="${2:-}" detected current ipv6_val current_ipv6 chosen iface_for_v6 conf_isp
   detected=$(detect_isp_interface)
   if [ -z "$detected" ]; then
     warn "Не удалось определить интерфейс провайдера (route/ip route)."
     return 1
   fi
-  # tr -d '\r"' — иначе CRLF из .conf даёт \r и ломает вывод (" переезжает в начало строки)
-  current=$(grep -E '^ISP_INTERFACE=' "$conf" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\r"' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-  info "Интерфейс провайдера (default route): $detected"
-  [ -n "$current" ] && info "В конфиге сейчас: ISP_INTERFACE=\"$current\""
-  if [ "$current" = "$detected" ]; then
-    info "ISP_INTERFACE уже совпадает с интерфейсом провайдера."
+
+  # Эталон: переданное значение из старого конфига, иначе то что уже в conf
+  # tr -d '\r"' — иначе CRLF из .conf даёт \r и ломает вывод
+  if [ -n "$preferred" ]; then
+    current=$(printf '%s' "$preferred" | tr -d '\r"' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
   else
-    if ! confirm_yes "Установить ISP_INTERFACE=\"$detected\"?"; then
-      warn "ISP_INTERFACE не изменён."
+    current=$(grep -E '^ISP_INTERFACE=' "$conf" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\r"' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  fi
+
+  info "Интерфейс провайдера (default route): $detected"
+  if [ -n "$current" ]; then
+    info "В текущем конфиге: ISP_INTERFACE=\"$current\""
+  else
+    info "В текущем конфиге ISP_INTERFACE не задан."
+  fi
+
+  chosen=""
+  if [ -n "$current" ] && [ "$current" = "$detected" ]; then
+    info "ISP_INTERFACE уже совпадает с интерфейсом провайдера."
+    chosen="$detected"
+  elif [ -z "$current" ]; then
+    if confirm_yes "Установить ISP_INTERFACE=\"$detected\"?"; then
+      chosen="$detected"
     else
-      if grep -qE '^ISP_INTERFACE=' "$conf" 2>/dev/null; then
-        sed -i "s|^ISP_INTERFACE=.*|ISP_INTERFACE=\"$detected\"|" "$conf"
-      else
-        printf 'ISP_INTERFACE="%s"\n' "$detected" | cat - "$conf" > "${conf}.new" && mv "${conf}.new" "$conf"
-      fi
-      info "ISP_INTERFACE=\"$detected\" записан в $conf"
+      warn "ISP_INTERFACE не изменён."
+    fi
+  else
+    # current ≠ detected: Y → detected, N → оставить как в текущем конфиге
+    if confirm_yes "Установить ISP_INTERFACE=\"$detected\"? (в текущем конфиге: \"$current\")"; then
+      chosen="$detected"
+    else
+      chosen="$current"
+      info "Оставляем ISP_INTERFACE=\"$current\" из текущего конфига."
     fi
   fi
 
-  # --- IPV6_ENABLED: наличие глобального IPv6 (2a00*) на интерфейсе провайдера ---
+  if [ -n "$chosen" ]; then
+    conf_isp=$(grep -E '^ISP_INTERFACE=' "$conf" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\r"' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    if [ "$conf_isp" != "$chosen" ]; then
+      set_isp_interface_line "$conf" "$chosen"
+      info "ISP_INTERFACE=\"$chosen\" записан в $conf"
+    fi
+  fi
+
+  # --- IPV6_ENABLED: по фактическому ISP (chosen или то что в conf / detected) ---
+  iface_for_v6="$chosen"
+  [ -z "$iface_for_v6" ] && iface_for_v6=$(grep -E '^ISP_INTERFACE=' "$conf" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\r"' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+  [ -z "$iface_for_v6" ] && iface_for_v6="$detected"
+
   echo
-  info "=== Проверка IPv6 на $detected ==="
-  if iface_has_global_ipv6 "$detected"; then
+  info "=== Проверка IPv6 на $iface_for_v6 ==="
+  if iface_has_global_ipv6 "$iface_for_v6"; then
     ipv6_val=1
-    info "Найден глобальный IPv6-адрес (2a00*) на $detected → IPV6_ENABLED=1"
+    info "Найден глобальный IPv6-адрес (2a00*) на $iface_for_v6 → IPV6_ENABLED=1"
   else
     ipv6_val=0
-    info "Глобальный IPv6 (2a00*) на $detected не найден → IPV6_ENABLED=0"
+    info "Глобальный IPv6 (2a00*) на $iface_for_v6 не найден → IPV6_ENABLED=0"
   fi
 
   current_ipv6=$(grep -E '^IPV6_ENABLED=' "$conf" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\r"' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
@@ -1813,7 +1854,6 @@ fix_isp_interface() {
     if grep -qE '^IPV6_ENABLED=' "$conf" 2>/dev/null; then
       sed -i "s|^IPV6_ENABLED=.*|IPV6_ENABLED=$ipv6_val|" "$conf"
     else
-      # добавляем после ISP_INTERFACE, если есть, иначе в начало
       if grep -qE '^ISP_INTERFACE=' "$conf" 2>/dev/null; then
         sed -i "/^ISP_INTERFACE=/a IPV6_ENABLED=$ipv6_val" "$conf"
       else
@@ -2027,7 +2067,7 @@ apply_strategy() {
   local ver="$1" conf_name="$2" conf_path conf_dest tmp had_rkn=0 rkn_path
   local saved_policy_name="" saved_policy_exclude="" had_policy=0
   local pn_val pe_val policy_nondefault=0
-  local init_script stopped_svc=0 cache_file
+  local init_script stopped_svc=0 cache_file saved_isp=""
 
   conf_dest=$(nfqws_conf_path "$ver")
 
@@ -2061,6 +2101,11 @@ apply_strategy() {
   if grep -qE '^POLICY_EXCLUDE=' "$conf_dest" 2>/dev/null; then
     saved_policy_exclude=$(grep -E '^POLICY_EXCLUDE=' "$conf_dest" 2>/dev/null | head -1 | tr -d '\r')
     had_policy=1
+  fi
+
+  # ISP_INTERFACE из текущего конфига (до замены стратегией) — эталон для сравнения с route
+  if grep -qE '^ISP_INTERFACE=' "$conf_dest" 2>/dev/null; then
+    saved_isp=$(grep -E '^ISP_INTERFACE=' "$conf_dest" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\r"' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
   fi
 
   info "Скачивание стратегии: $conf_name"
@@ -2146,7 +2191,8 @@ apply_strategy() {
 
   echo
   info "=== Проверка ISP_INTERFACE / IPV6_ENABLED ==="
-  fix_isp_interface "$conf_dest"
+  # $saved_isp — значение из конфига до смены стратегии
+  fix_isp_interface "$conf_dest" "$saved_isp"
 
   echo
   info "=== Проверка blobs ==="
