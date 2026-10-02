@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.11"
+SCRIPT_VERSION="0.9.12"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -3871,9 +3871,6 @@ menu_dpi_detector() {
 menu_awg_manager() {
   echo
   info "awg-manager — установка через awg-compressed"
-  info "Источник: $AWG_MANAGER_INSTALL_URL"
-  echo
-  info "Запуск установщика..."
   run_remote_sh "$AWG_MANAGER_INSTALL_URL" || return 1
   info "Установщик awg-manager завершил работу."
 }
@@ -5880,7 +5877,7 @@ main_menu() {
     echo "      15. telemt / telemt-panel"
     echo "      16. TG WS Proxy Rust"
     echo
-    printf '%s\n' "${CYAN}${BOLD}[::]  ${LBL_REMOVE} [${GREEN}S${CYAN}]  |  Lang: En/Ru [${GREEN}77${CYAN}]${NC}"
+    printf '%s\n' "${CYAN}${BOLD}[::]  ${LBL_REMOVE} [${GREEN}S${CYAN}${BOLD}]  |  Lang: En/Ru [${GREEN}77${CYAN}${BOLD}]${NC}"
     echo "      88. $LBL_88"
     echo "      99. $LBL_99"
     echo "      00. $LBL_00"
