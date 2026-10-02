@@ -1797,9 +1797,9 @@ fix_isp_interface() {
     current=$(grep -E '^ISP_INTERFACE=' "$conf" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\r"' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
   fi
 
-  info "Интерфейс провайдера (default route): $detected"
+  info "Интерфейс провайдера (default route): ${GREEN}${detected}${NC}"
   if [ -n "$current" ]; then
-    info "В текущем конфиге: ISP_INTERFACE=\"$current\""
+    info "В текущем конфиге: ISP_INTERFACE=\"${RED}${current}${NC}\""
   else
     info "В текущем конфиге ISP_INTERFACE не задан."
   fi
@@ -1809,19 +1809,23 @@ fix_isp_interface() {
     info "ISP_INTERFACE уже совпадает с интерфейсом провайдера."
     chosen="$detected"
   elif [ -z "$current" ]; then
-    if confirm_yes "Установить ISP_INTERFACE=\"$detected\"?"; then
-      chosen="$detected"
-    else
-      warn "ISP_INTERFACE не изменён."
-    fi
+    ask "Установить ISP_INTERFACE=\"${GREEN}${detected}${NC}\"? [${GREEN}Y${NC}/${RED}n${NC}]: "
+    read -r ans
+    case "$ans" in
+      n|N|н|Н) warn "ISP_INTERFACE не изменён." ;;
+      *) chosen="$detected" ;;
+    esac
   else
     # current ≠ detected: Y → detected, N → оставить как в текущем конфиге
-    if confirm_yes "Установить ISP_INTERFACE=\"$detected\"? (в текущем конфиге: \"$current\")"; then
-      chosen="$detected"
-    else
-      chosen="$current"
-      info "Оставляем ISP_INTERFACE=\"$current\" из текущего конфига."
-    fi
+    ask "Установить ISP_INTERFACE=\"${GREEN}${detected}${NC}\"? (в текущем конфиге: \"${RED}${current}${NC}\") [${GREEN}Y${NC}/${RED}n${NC}]: "
+    read -r ans
+    case "$ans" in
+      n|N|н|Н)
+        chosen="$current"
+        info "Оставляем ISP_INTERFACE=\"${RED}${current}${NC}\" из текущего конфига."
+        ;;
+      *) chosen="$detected" ;;
+    esac
   fi
 
   if [ -n "$chosen" ]; then
