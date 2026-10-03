@@ -276,7 +276,8 @@ download_and_install_binary() {
     mkdir -p "$TMPDIR" /opt/usr/bin "$CONFIG_DIR"
 
     if [ "${TELEMT_SOURCE:-github}" = "ipk" ]; then
-        # mips/mipsel: .ipk с test.entware (directory listing, без Packages.gz)
+        # mips/mipsel: .ipk с test.entware (нет Packages.gz)
+        # config.toml в conffiles — opkg не перезапишет существующий
         if [ -z "${LATEST_IPK_URL:-}" ] || [ -z "${LATEST_IPK_NAME:-}" ]; then
             get_latest_ipk_meta || true
         fi
@@ -286,37 +287,36 @@ download_and_install_binary() {
         fi
         echo "Downloading Telemt ipk $_ver..."
         echo "  $LATEST_IPK_URL"
-        IPK_PATH="$TMPDIR/telemt.ipk"
+        # /tmp обычно tmpfs — не жрём место на /opt
+        IPK_PATH="/tmp/telemt_$$.ipk"
         if command -v wget >/dev/null 2>&1; then
-            wget -O "$IPK_PATH" "$LATEST_IPK_URL" || return 1
+            wget -O "$IPK_PATH" "$LATEST_IPK_URL" || { rm -f "$IPK_PATH"; return 1; }
         else
-            curl -fL -o "$IPK_PATH" "$LATEST_IPK_URL" || return 1
+            curl -fL -o "$IPK_PATH" "$LATEST_IPK_URL" || { rm -f "$IPK_PATH"; return 1; }
         fi
-        echo "Extracting binary from ipk (config из ipk НЕ трогаем)..."
-        # ipk = gzip+tar с data.tar.gz
-        rm -rf "$TMPDIR/ipk_unpack"
-        mkdir -p "$TMPDIR/ipk_unpack"
-        tar -xzf "$IPK_PATH" -C "$TMPDIR/ipk_unpack" || return 1
-        if [ -f "$TMPDIR/ipk_unpack/data.tar.gz" ]; then
-            tar -xzf "$TMPDIR/ipk_unpack/data.tar.gz" -C "$TMPDIR/ipk_unpack" || return 1
-        elif [ -f "$TMPDIR/ipk_unpack/data.tar.xz" ]; then
-            tar -xJf "$TMPDIR/ipk_unpack/data.tar.xz" -C "$TMPDIR/ipk_unpack" || return 1
-        else
-            echo "ERROR: data.tar.* not found in ipk"
-            rm -rf "$TMPDIR"
-            return 1
+        echo "opkg install $IPK_PATH ..."
+        # --force-reinstall: обновить уже стоящий пакет; conffiles сохранят config.toml
+        if ! opkg install --force-reinstall "$IPK_PATH"; then
+            echo "opkg install --force-reinstall failed, trying plain install..."
+            if ! opkg install "$IPK_PATH"; then
+                echo "ERROR: opkg install failed (мало места на /opt? df -h /opt)"
+                rm -f "$IPK_PATH"
+                return 1
+            fi
         fi
-        TELEMT_BIN=$(find "$TMPDIR/ipk_unpack" -type f -name telemt 2>/dev/null | head -n 1)
-        if [ -z "$TELEMT_BIN" ]; then
-            echo "ERROR: telemt binary not found in ipk!"
-            rm -rf "$TMPDIR"
-            return 1
+        rm -f "$IPK_PATH"
+        if [ ! -x "$BIN_PATH" ]; then
+            # на всякий случай — путь из пакета
+            if [ -x /opt/usr/bin/telemt ]; then
+                BIN_PATH=/opt/usr/bin/telemt
+            else
+                echo "ERROR: telemt binary missing after opkg install"
+                return 1
+            fi
         fi
-        cp "$TELEMT_BIN" "$BIN_PATH"
-        chmod +x "$BIN_PATH"
+        mkdir -p "$CONFIG_DIR"
         echo "$_ver" > "$VERSION_FILE"
-        echo "Binary installed: $BIN_PATH ($_ver) [ipk]"
-        rm -rf "$TMPDIR"
+        echo "Package installed: telemt $_ver [opkg/ipk]"
         return 0
     fi
 
@@ -518,7 +518,11 @@ HAS_BIN=0
 ensure_deps 0
 
 LOCAL_VER=$(get_local_version)
-echo "Detecting latest Telemt version from GitHub..."
+if [ "${TELEMT_SOURCE:-github}" = "ipk" ]; then
+    echo "Detecting latest Telemt version from $TELEMT_IPK_BASE ..."
+else
+    echo "Detecting latest Telemt version from GitHub..."
+fi
 LATEST_VER=$(get_latest_version)
 if [ -z "$LATEST_VER" ]; then
     echo "WARNING: не удалось получить latest с GitHub, пробуем с обновлением зависимостей..."
@@ -526,7 +530,7 @@ if [ -z "$LATEST_VER" ]; then
     LATEST_VER=$(get_latest_version)
 fi
 if [ -z "$LATEST_VER" ]; then
-    echo "ERROR: Cannot detect latest version from GitHub!"
+    echo "ERROR: Cannot detect latest Telemt version!"
     exit 1
 fi
 echo "Latest version: $LATEST_VER"
