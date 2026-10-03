@@ -4692,10 +4692,10 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
-# 16. telemt / telemt-panel  (installer_telemt_v3.sh in this repo; panel from augin)
+# 16. telemt / telemt-panel  (installer_telemt_v3.sh + install_telemt-panel.sh in this repo)
 # ---------------------------------------------------------------------------
 TELEMT_INSTALL_URL="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_telemt_v3.sh"
-TELEMT_PANEL_INSTALL_URL="https://raw.githubusercontent.com/augin/telemt_script/main/install_telemt-panel.sh"
+TELEMT_PANEL_INSTALL_URL="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/install_telemt-panel.sh"
 TELEMT_SYSTEMCTL_URL="https://raw.githubusercontent.com/anch665/keendev/main/systemctl.sh"
 TELEMT_JOURNALCTL_URL="https://raw.githubusercontent.com/anch665/keendev/main/journalctl.sh"
 
@@ -4807,8 +4807,8 @@ menu_telemt() {
     printf '%s\n' "${DIM}полностью реализует официальный алгоритм Telegram-прокси${NC}"
     printf '%s\n' "${DIM}и добавляет множество улучшений.${NC}"
     echo
-    printf '%s\n' "${DIM}Скрипт telemt: installer_telemt_v3.sh (этот репозиторий)${NC}"
-    printf '%s\n' "${DIM}panel: https://github.com/augin/telemt_script${NC}"
+    printf '%s\n' "${DIM}Скрипты: installer_telemt_v3.sh, install_telemt-panel.sh (этот репозиторий)${NC}"
+    printf '%s\n' "${DIM}panel upstream: https://github.com/amirotin/telemt_panel${NC}"
     printf '%s\n' "${DIM}(Entware / Keenetic; aarch64, x86_64, mipsel, mips)${NC}"
     echo
     if is_telemt_installed; then
