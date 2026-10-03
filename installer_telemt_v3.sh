@@ -5,12 +5,19 @@ set -o pipefail
 
 echo "=== Telemt installer for Entware (v3) ==="
 
+# ANSI-цвета (printf — portable для ash/BusyBox)
+RED=$(printf '\033[0;31m')
+YELLOW=$(printf '\033[1;33m')
+GREEN=$(printf '\033[0;32m')
+BOLD=$(printf '\033[1m')
+NC=$(printf '\033[0m')
+
 CONFIG_DIR="/opt/etc/telemt"
 CONFIG_FILE="$CONFIG_DIR/config.toml"
 VERSION_FILE="$CONFIG_DIR/.version"
 BIN_PATH="/opt/usr/bin/telemt"
 INIT_SCRIPT="/opt/etc/init.d/S99telemt"
-TMPDIR="/opt/tmp/telemt_dl"
+TMPDIR="/tmp/telemt_dl"
 
 # --- Detect architecture (как в nfqws-menu.sh) ---
 # На Keenetic uname -m для mips/mipsel часто врёт → сначала opkg / opkg.conf.
@@ -660,15 +667,19 @@ printf "Enter username (default user1): "
 read USERNAME || true
 USERNAME=${USERNAME:-user1}
 
-printf "Enable read-only API mode? По умолчанию в telemt-panel вы сможете только просматривать статистику и редактировать конфиг (y/n, default y): "
+echo ""
+echo "Режим read_only API (telemt):"
+echo "  1 — (true)  только чтение: статистика и просмотр конфига в панели"
+echo "  2 — (false) полный доступ API: пользователи, секреты, управление"
+printf "Включить режим только чтения? (1/2, по умолчанию: 1): "
 read READONLY || true
-READONLY=${READONLY:-y}
+READONLY=${READONLY:-1}
 case "$READONLY" in
-    y|Y) READONLY_FLAG=true ;;
-    n|N) READONLY_FLAG=false ;;
-    *) echo "Invalid input, using default: read-only = true"; READONLY_FLAG=true ;;
+    1|y|Y) READONLY_FLAG=true ;;
+    2|n|N) READONLY_FLAG=false ;;
+    *) echo "Неверный ввод, оставляем read-only = true"; READONLY_FLAG=true ;;
 esac
-echo "read-only mode: $READONLY_FLAG"
+echo "API read_only: $READONLY_FLAG"
 
 echo "Generating HEX16 secret..."
 USER_SECRET=$(openssl rand -hex 16)
@@ -849,7 +860,39 @@ if command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
         jq -r '.data[] | "[\(.username)]", (.links.classic[]? | "classic: \(.)"), (.links.secure[]? | "secure: \(.)"), (.links.tls[]? | "tls: \(.)"), ""' 2>/dev/null || true
 fi
 echo ""
-echo "⚠️ Не забудьте открыть порт $PORT в межсетевом экране!!!"
-echo "Межсетевой экран -> Добавить правило -> Порт назначения равен $PORT. ✅ Включить правило. -> Сохранить"
-echo "⚠️Если у вас не внешний IP, т.е. от провайдера вы получаете IP первый октет(цифра) которого 10|100|172|192, то подключиться к прокси вы сможете только внутри вашей локальной сети.⚠️"
+printf '%s\n' "${RED}${BOLD}⚠️  Не забудьте открыть порт $PORT в межсетевом экране!${NC}"
+printf '%s\n' "${RED}   Межсетевой экран → Добавить правило → Порт назначения = $PORT → ✅ Включить → Сохранить${NC}"
+
+# «Серый» IP: RFC1918 + CGNAT 100.64/10 — только тогда предупреждаем
+_is_grey_ip() {
+    _ip="$1"
+    case "$_ip" in
+        10.*|192.168.*|127.*) return 0 ;;
+        169.254.*) return 0 ;;
+        100.*)
+            _o2=$(echo "$_ip" | cut -d. -f2)
+            [ "$_o2" -ge 64 ] 2>/dev/null && [ "$_o2" -le 127 ] 2>/dev/null && return 0
+            return 1
+            ;;
+        172.*)
+            _o2=$(echo "$_ip" | cut -d. -f2)
+            [ "$_o2" -ge 16 ] 2>/dev/null && [ "$_o2" -le 31 ] 2>/dev/null && return 0
+            return 1
+            ;;
+        *) return 1 ;;
+    esac
+}
+_check_ip="$AUTO_IP"
+# если public_host — тоже IP, проверяем его
+case "$PUBLIC_HOST" in
+    *[!0-9.]*|"") ;;
+    *) _check_ip="$PUBLIC_HOST" ;;
+esac
+if _is_grey_ip "$_check_ip"; then
+    echo ""
+    printf '%s\n' "${RED}${BOLD}⚠️  Обнаружен «серый» IP: $_check_ip${NC}"
+    printf '%s\n' "${RED}   Адрес из частных/CGNAT диапазонов (10.x / 100.64–127.x / 172.16–31.x / 192.168.x).${NC}"
+    printf '%s\n' "${RED}   С интернета к прокси, скорее всего, не подключиться — только из вашей локальной сети.${NC}"
+    printf '%s\n' "${RED}   Нужен белый IP, проброс порта у провайдера или туннель (VPN/WARP и т.п.).${NC}"
+fi
 sync_telemt_panel || true
