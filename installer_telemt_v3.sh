@@ -148,6 +148,33 @@ else
 fi
 
 # --- Helpers ---
+
+# Свободное место на /opt (kB). $1 = минимум kB
+check_opt_space() {
+    _need_kb="${1:-11000}"
+    _avail=$(df -k /opt 2>/dev/null | awk 'NR==2 {print $4}')
+    if [ -z "$_avail" ] || ! [ "$_avail" -ge 0 ] 2>/dev/null; then
+        _avail=$(df -P -k /opt 2>/dev/null | awk 'NR==2 {print $4}')
+    fi
+    if [ -z "$_avail" ] || ! [ "$_avail" -ge 0 ] 2>/dev/null; then
+        echo "WARNING: не удалось определить свободное место на /opt"
+        df -h /opt 2>/dev/null || true
+        return 0
+    fi
+    echo "Свободно на /opt: ${_avail} kB (нужно ≥ ${_need_kb} kB)"
+    if [ "$_avail" -lt "$_need_kb" ]; then
+        echo ""
+        printf '%s\n' "${RED}ERROR: недостаточно места на /opt${NC}"
+        echo "  Доступно: ${_avail} kB"
+        echo "  Требуется: ≥ ${_need_kb} kB"
+        echo "  Освободите место (логи, старые пакеты, /opt/tmp) и повторите."
+        echo ""
+        df -h /opt 2>/dev/null || df -h 2>/dev/null || true
+        return 1
+    fi
+    return 0
+}
+
 get_local_version() {
     if [ -f "$VERSION_FILE" ]; then
         cat "$VERSION_FILE" 2>/dev/null | head -n1 | tr -d ' \r\n'
@@ -280,6 +307,8 @@ EOF
 
 download_and_install_binary() {
     _ver="$1"
+    # ~10 MB + запас
+    check_opt_space 11000 || return 1
     mkdir -p "$TMPDIR" /opt/usr/bin "$CONFIG_DIR"
 
     if [ "${TELEMT_SOURCE:-github}" = "ipk" ]; then
@@ -302,6 +331,7 @@ download_and_install_binary() {
             curl -fL -o "$IPK_PATH" "$LATEST_IPK_URL" || { rm -f "$IPK_PATH"; return 1; }
         fi
         echo "opkg install $IPK_PATH ..."
+        check_opt_space 11000 || { rm -f "$IPK_PATH"; return 1; }
         # --force-reinstall: обновить уже стоящий пакет; conffiles сохранят config.toml
         if ! opkg install --force-reinstall "$IPK_PATH"; then
             echo "opkg install --force-reinstall failed, trying plain install..."
