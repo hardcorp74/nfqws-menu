@@ -6,6 +6,7 @@ CONF_FILE="${SCRIPT_DIR}/as.conf"
 LISTS_DIR="/opt/etc/nfqws2/lists"
 #DOWNLOAD_URL="https://sw.ext.io/asw/%s?v4"
 DOWNLOAD_URL="https://asn.web2core.workers.dev/%s?v4"
+DOWNLOAD_URL_Z2K="https://raw.githubusercontent.com/necronicle/z2k/refs/heads/z2k-enhanced/files/lists/tcp16_nets.txt"
 
 # Check installed utils
 if command -v wget >/dev/null 2>&1; then
@@ -40,6 +41,68 @@ draw_header() {
     echo "            IPSet AS List Generator            "
     echo "=================================================="
     echo ""
+}
+
+# Make simple merge cidr after sorted
+merge_cidrs() {
+    awk '
+    function ip2dec(ip,   a) {
+        split(ip, a, ".")
+        return (a[1] * 16777216) + (a[2] * 65536) + (a[3] * 256) + a[4]
+    }
+    function dec2ip(dec) {
+        return int(dec / 16777216) "." int((dec % 16777216) / 65536) "." int((dec % 65536) / 256) "." (dec % 256)
+    }
+    {
+        ip = $1; mask = 32
+        if (index(ip, "/") > 0) {
+            split(ip, a, "/")
+            ip = a[1]; mask = int(a[2])
+        }
+        sz = int(2 ^ (32 - mask))
+        s = int(ip2dec(ip) / sz) * sz
+        e = s + sz - 1
+
+        if (c == 0) { cs = s; ce = e; c = 1; next }
+
+        if (s <= ce + 1) {
+            if (e > ce) ce = e
+        } else {
+            out(cs, ce)
+            cs = s; ce = e
+        }
+    }
+    END { if (c > 0) out(cs, ce) }
+
+    function out(s, e,   cur, m, sz) {
+        cur = s
+        while (cur <= e) {
+            for (m = 0; m <= 32; m++) {
+                sz = int(2 ^ (32 - m))
+                if (cur % sz == 0 && cur + sz - 1 <= e) break
+            }
+            print dec2ip(cur) "/" m
+            cur += int(2 ^ (32 - m))
+        }
+    }
+    '
+}
+
+# Make mask big for optimize
+mask_16() {
+    awk '
+    {
+        split($1, a, "/")
+        ip = a[1]
+        mask = (a[2] != "") ? int(a[2]) : 32
+        split(ip, oct, ".")
+        if (mask > 16) {
+            print oct[1] "." oct[2] ".0.0/16"
+        } else {
+            print $1
+        }
+    }
+    '
 }
 
 get_providers() {
@@ -178,42 +241,111 @@ menu_providers() {
     done
 }
 
-# Download cidr
-run_download() {
+# Get ipset as list from z2k
+run_download_z2k() {
+    draw_header
+    mkdir -p "$LISTS_DIR"
+    output_file="${LISTS_DIR}/ipset_as.list"
+
+    echo " Download from Z2K..."
+    echo " ------------------------------------------------"
+
+    $FETCHER "$DOWNLOAD_URL_Z2K" | awk '!/^#/ && !/:/ && NF>=2 {print $2}' | sort -u > "$output_file"
+
+    if [ -s "$output_file" ]; then
+        ip_count=$(wc -l < "$output_file")
+        echo "$GREEN"" [✓] Done! Full file: $(basename "$output_file") ($ip_count cidr)""$NC"
+    else
+        echo "$RED"" [X] Error: Downloaded file is empty!""$NC"
+    fi
+
+    echo " ------------------------------------------------"
+    printf " Press Enter for Menu..."
+    read -r _
+}
+
+# Download all as
+run_download_all_as() {
     draw_header
     mkdir -p "$LISTS_DIR"
     output_file="${LISTS_DIR}/ipset_as.list"
     temp_file="${output_file}.tmp"
     > "$temp_file"
-    echo " Download selected AS..."
-    echo " --------------------------------------------------"
 
-    active_as_list=$(grep '=1$' "$CONF_FILE" | cut -d'=' -f1)
+    echo " Download all AS..."
+    echo " ------------------------------------------------"
 
-    if [ -z "$active_as_list" ]; then
-        echo "$YELLOW"" [!] Warning: AS not selected!""$NC"
-    else
-        for item in $active_as_list; do
-            prov=$(echo "$item" | cut -d':' -f1)
-            as=$(echo "$item" | cut -d':' -f2)
+# Select all providers
+    all_as_list=$(cut -d'=' -f1 "$CONF_FILE" | grep -v '^#' | cut -d':' -f2 | sort -u)
 
-            echo " Download [$prov] - $as..."
-            $FETCHER "$(printf "$DOWNLOAD_URL" "$as")" 2>/dev/null >> "$temp_file"
-        done
-    fi
+    for as in $all_as_list; do
+        echo " Download - $as..."
+        $FETCHER "$(printf "$DOWNLOAD_URL" "$as")" 2>/dev/null >> "$temp_file"
+    done
 
     echo ""
-    echo " Sorted and filter cidr..."
+    echo " Optimize ipset list..."
     if [ -s "$temp_file" ]; then
-        grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?' "$temp_file" | sort -u > "$output_file"
-        ip_count=$(wc -l < "$output_file" 2>/dev/null)
-        echo "$GREEN"" [✓] Done! File: $(basename "$output_file") ($ip_count cidr).""$NC"
+        grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?' "$temp_file" \
+            | mask_16 \
+            | sort -t . -k 1,1n -k 2,2n -k 3,3n -k 4,4n -u \
+            | merge_cidrs > "$output_file"
+
+        ip_count=$(wc -l < "$output_file")
+        echo "$GREEN"" [✓] Done! Full file: $(basename "$output_file") ($ip_count cidr)""$NC"
     else
-        echo "$RED"" [X] Error: No data!""$NC"
+        echo "$RED"" [X] Error: Downloaded file is empty!""$NC"
         > "$output_file"
     fi
 
     rm -f "$temp_file"
+    echo " ------------------------------------------------"
+    printf " Press Enter for Menu..."
+    read -r _
+}
+
+# Download selected as
+run_download_providers() {
+    draw_header
+    mkdir -p "$LISTS_DIR"
+    echo " Download selected AS..."
+    echo " --------------------------------------------------"
+
+    active_providers=$(grep '=1$' "$CONF_FILE" | cut -d':' -f1 | sort -u)
+
+    if [ -z "$active_providers" ]; then
+        echo "$YELLOW"" [!] Warning: AS not selected!""$NC"
+    else
+        for prov in $active_providers; do
+            output_file="${LISTS_DIR}/ipset_as_${prov}.list"
+            temp_file="${output_file}.tmp"
+            > "$temp_file"
+
+            as_list=$(grep "^${prov}:" "$CONF_FILE" | grep '=1$' | cut -d':' -f2 | cut -d'=' -f1)
+
+            echo " Download: $prov"
+            for as in $as_list; do
+                echo " Download $as..."
+                $FETCHER "$(printf "$DOWNLOAD_URL" "$as")" 2>/dev/null >> "$temp_file"
+            done
+
+            if [ -s "$temp_file" ]; then
+                grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?' "$temp_file" \
+                    | sort -t . -k 1,1n -k 2,2n -k 3,3n -k 4,4n -u \
+                    | merge_cidrs > "$output_file"
+
+                ip_count=$(wc -l < "$output_file")
+                echo "$GREEN"" [✓] Done! File: $(basename "$output_file") ($ip_count cidr).""$NC"
+            else
+                echo "$RED"" [X] Error: No data!""$NC"
+                rm -f "$output_file"
+            fi
+
+            rm -f "$temp_file"
+            echo ""
+        done
+    fi
+
     echo " --------------------------------------------------"
     printf " Press Enter for Menu..."
     read -r _
@@ -222,16 +354,20 @@ run_download() {
 # Main menu
 while true; do
     draw_header
-    echo " 1) Select AS"
-    echo " 2) Download ipset_as.list"
+    echo " 1) Download all AS Z2K ipset_as.list"
+    echo " 2) Download all AS ipset_as.list"
+    echo " 3) Download ipset_as_<provider>.list"
+    echo " 4) Select AS"
     echo " 0) Exit"
     echo ""
     printf " Enter: "
     read -r main_choice
 
     case "$main_choice" in
-        1) menu_providers ;;
-        2) run_download ;;
+        1) run_download_z2k ;;
+        2) run_download_all_as ;;
+        3) run_download_providers ;;
+        4) menu_providers ;;
         0) clear; exit 0 ;;
     esac
 done
