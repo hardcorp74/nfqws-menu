@@ -12,36 +12,133 @@ BIN_PATH="/opt/usr/bin/telemt"
 INIT_SCRIPT="/opt/etc/init.d/S99telemt"
 TMPDIR="/opt/tmp/telemt_dl"
 
-# --- Detect architecture early (for feeds & binary) ---
-ARCH=$(uname -m)
+# --- Detect architecture (как в nfqws-menu.sh) ---
+# На Keenetic uname -m для mips/mipsel часто врёт → сначала opkg / opkg.conf.
+# mipsel* проверяем ДО mips*.
+
+_arch_normalize() {
+    case "$1" in
+        aarch64*|arm64*)             echo "aarch64" ;;
+        mipsel*|mipselsf*|mips64el*) echo "mipsel" ;;
+        mips*|mipssf*)               echo "mips" ;;
+        x86_64*|amd64*|x64*)         echo "x86_64" ;;
+        *)                           echo "" ;;
+    esac
+}
+
+_arch_pick_best() {
+    awk '
+        $1 == "arch" && $2 != "" && $2 != "all" {
+            p = $3 + 0
+            n = $2
+            bonus = 0
+            if (n ~ /^mipsel/ || n ~ /^mipselsf/ || n ~ /^mips64el/) bonus = 2
+            else if (n ~ /^aarch64/ || n ~ /^arm64/) bonus = 2
+            score = p * 10 + bonus
+            if (score > best) { best = score; name = n }
+        }
+        END { if (name != "") print name }
+    '
+}
+
+_arch_from_opkg() {
+    opkg print-architecture 2>/dev/null | _arch_pick_best
+}
+
+_arch_from_opkg_conf() {
+    conf="${1:-/opt/etc/opkg.conf}"
+    [ -f "$conf" ] || return 0
+    name=$(grep -E '^[[:space:]]*arch[[:space:]]+' "$conf" 2>/dev/null | _arch_pick_best) || true
+    if [ -n "$name" ]; then
+        printf '%s\n' "$name"
+        return 0
+    fi
+    from_url=""
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in
+            src/gz*|src\ *)
+                case "$line" in
+                    *mipselsf*|*mips64el*|*mipsel*) from_url="mipsel"; break ;;
+                    *mipssf*|*mips*)                from_url="mips"; break ;;
+                    *aarch64*|*arm64*)              from_url="aarch64"; break ;;
+                    *x86_64*|*amd64*)               from_url="x86_64"; break ;;
+                esac
+                ;;
+        esac
+    done < "$conf"
+    [ -n "$from_url" ] && printf '%s\n' "$from_url"
+}
+
+detect_telemt_arch() {
+    ARCH=""
+    ARCH_RAW=""
+    ARCH_SOURCE=""
+
+    ARCH_RAW=$(_arch_from_opkg) || true
+    ARCH=$(_arch_normalize "$ARCH_RAW")
+    [ -n "$ARCH" ] && ARCH_SOURCE="opkg"
+
+    if [ -z "$ARCH" ]; then
+        ARCH_RAW=$(_arch_from_opkg_conf /opt/etc/opkg.conf) || true
+        ARCH=$(_arch_normalize "$ARCH_RAW")
+        [ -n "$ARCH" ] && ARCH_SOURCE="conf"
+    fi
+
+    # uname: mips/mipsel на Keenetic не доверяем
+    if [ -z "$ARCH" ]; then
+        um=$(uname -m 2>/dev/null || true)
+        case "$um" in
+            mips|mipsel|mips64|mips64el|"") ;;
+            *)
+                cand=$(_arch_normalize "$um")
+                if [ -n "$cand" ]; then
+                    ARCH="$cand"
+                    ARCH_RAW="$um"
+                    ARCH_SOURCE="uname"
+                fi
+                ;;
+        esac
+    fi
+}
+
+detect_telemt_arch
+
 case "$ARCH" in
     aarch64)
+        TELEMT_SOURCE="github"
         TELEMT_FILE="telemt-aarch64-linux-musl.tar.gz"
         ;;
-    x86_64|amd64)
+    x86_64)
+        TELEMT_SOURCE="github"
         TELEMT_FILE="telemt-x86_64-linux-musl.tar.gz"
         ;;
-    mipsel|mips32|mips32r2)
-        TELEMT_FILE="telemt-mipsel-linux-musl.tar.gz"
-        if ! grep -q 'test.entware.net/mipssf-k3.4/4test/le' /opt/etc/opkg.conf 2>/dev/null; then
-            echo "src/gz entware-mipssf-le https://test.entware.net/mipssf-k3.4/4test/le" >> /opt/etc/opkg.conf
-            echo "Added mipsel (le) test feed"
-        fi
+    mipsel)
+        # GitHub releases без mipsel — ставим .ipk с test.entware (нет Packages.gz)
+        TELEMT_SOURCE="ipk"
+        TELEMT_IPK_BASE="https://test.entware.net/mipssf-k3.4/4test/le"
+        TELEMT_IPK_ARCH="mipsel-3.4"
+        TELEMT_FILE=""
         ;;
     mips)
-        TELEMT_FILE="telemt-mips-linux-musl.tar.gz"
-        if ! grep -q 'test.entware.net/mipssf-k3.4/4test/be' /opt/etc/opkg.conf 2>/dev/null; then
-            echo "src/gz entware-mipssf-be https://test.entware.net/mipssf-k3.4/4test/be" >> /opt/etc/opkg.conf
-            echo "Added mips (be) test feed"
-        fi
+        TELEMT_SOURCE="ipk"
+        TELEMT_IPK_BASE="https://test.entware.net/mipssf-k3.4/4test/be"
+        TELEMT_IPK_ARCH="mips-3.4"
+        TELEMT_FILE=""
         ;;
     *)
-        echo "ERROR: Unsupported architecture: $ARCH"
+        echo "ERROR: Unsupported or unknown architecture: '${ARCH:-?}' (raw=${ARCH_RAW:-?}, src=${ARCH_SOURCE:-none})"
+        echo "uname -m: $(uname -m 2>/dev/null || true)"
+        echo "opkg print-architecture:"
+        opkg print-architecture 2>/dev/null || true
         echo "Supported: aarch64, x86_64, mipsel, mips"
         exit 1
         ;;
 esac
-echo "Architecture: $ARCH → $TELEMT_FILE"
+if [ "$TELEMT_SOURCE" = "ipk" ]; then
+    echo "Architecture: $ARCH → ipk from $TELEMT_IPK_BASE (detect: ${ARCH_SOURCE:-?}, raw: ${ARCH_RAW:-?})"
+else
+    echo "Architecture: $ARCH → $TELEMT_FILE (detect: ${ARCH_SOURCE:-?}, raw: ${ARCH_RAW:-?})"
+fi
 
 # --- Helpers ---
 get_local_version() {
@@ -59,15 +156,69 @@ get_local_version() {
     echo ""
 }
 
+_http_get() {
+    if command -v wget >/dev/null 2>&1; then
+        wget -qO- "$1" 2>/dev/null
+    elif command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$1" 2>/dev/null
+    fi
+}
+
+# latest telemt_X.Y.Z-N_<arch>.ipk из directory listing (без Packages.gz)
+get_latest_ipk_meta() {
+    # выставляет: LATEST_VER, LATEST_IPK_NAME, LATEST_IPK_URL
+    LATEST_VER=""
+    LATEST_IPK_NAME=""
+    LATEST_IPK_URL=""
+    html=$(_http_get "$TELEMT_IPK_BASE/") || true
+    [ -n "$html" ] || return 1
+    # telemt_3.5.7-1_mipsel-3.4.ipk
+    names=$(printf '%s\n' "$html" | grep -oE "telemt_[0-9]+\\.[0-9]+\\.[0-9]+-[0-9]+_${TELEMT_IPK_ARCH}\\.ipk" | sort -u) || true
+    [ -n "$names" ] || return 1
+    # выбрать максимальный X.Y.Z-N (portable, без sort -V)
+    best_name=""
+    best_a=0; best_b=0; best_c=0; best_r=0
+    for n in $names; do
+        ver=$(printf '%s\n' "$n" | sed -n "s/^telemt_\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)-.*/\1/p")
+        rev=$(printf '%s\n' "$n" | sed -n "s/^telemt_[0-9.]*-\([0-9][0-9]*\)_.*/\1/p")
+        a=$(echo "$ver" | cut -d. -f1)
+        b=$(echo "$ver" | cut -d. -f2)
+        c=$(echo "$ver" | cut -d. -f3)
+        r=${rev:-0}
+        newer=0
+        if [ "$a" -gt "$best_a" ] 2>/dev/null; then newer=1
+        elif [ "$a" -eq "$best_a" ] 2>/dev/null; then
+            if [ "$b" -gt "$best_b" ] 2>/dev/null; then newer=1
+            elif [ "$b" -eq "$best_b" ] 2>/dev/null; then
+                if [ "$c" -gt "$best_c" ] 2>/dev/null; then newer=1
+                elif [ "$c" -eq "$best_c" ] 2>/dev/null && [ "$r" -gt "$best_r" ] 2>/dev/null; then newer=1
+                fi
+            fi
+        fi
+        if [ -z "$best_name" ] || [ "$newer" -eq 1 ]; then
+            best_name="$n"
+            best_a=$a; best_b=$b; best_c=$c; best_r=$r
+            LATEST_VER="$ver"
+        fi
+    done
+    [ -n "$best_name" ] || return 1
+    LATEST_IPK_NAME="$best_name"
+    LATEST_IPK_URL="$TELEMT_IPK_BASE/$best_name"
+    return 0
+}
+
 get_latest_version() {
     ver=""
-    if command -v wget >/dev/null 2>&1; then
-        ver=$(wget -qO- https://api.github.com/repos/telemt/telemt/releases/latest 2>/dev/null | \
-            grep '"tag_name"' | head -n1 | cut -d '"' -f 4)
-    elif command -v curl >/dev/null 2>&1; then
-        ver=$(curl -fsSL https://api.github.com/repos/telemt/telemt/releases/latest 2>/dev/null | \
-            grep '"tag_name"' | head -n1 | cut -d '"' -f 4)
+    if [ "${TELEMT_SOURCE:-github}" = "ipk" ]; then
+        if get_latest_ipk_meta; then
+            echo "$LATEST_VER"
+            return 0
+        fi
+        echo ""
+        return 0
     fi
+    ver=$(_http_get https://api.github.com/repos/telemt/telemt/releases/latest | \
+        grep '"tag_name"' | head -n1 | cut -d '"' -f 4) || true
     echo "$ver"
 }
 
@@ -122,12 +273,62 @@ EOF
 
 download_and_install_binary() {
     _ver="$1"
+    mkdir -p "$TMPDIR" /opt/usr/bin "$CONFIG_DIR"
+
+    if [ "${TELEMT_SOURCE:-github}" = "ipk" ]; then
+        # mips/mipsel: .ipk с test.entware (directory listing, без Packages.gz)
+        if [ -z "${LATEST_IPK_URL:-}" ] || [ -z "${LATEST_IPK_NAME:-}" ]; then
+            get_latest_ipk_meta || true
+        fi
+        if [ -z "${LATEST_IPK_URL:-}" ]; then
+            echo "ERROR: не найден telemt_*.ipk в $TELEMT_IPK_BASE/"
+            return 1
+        fi
+        echo "Downloading Telemt ipk $_ver..."
+        echo "  $LATEST_IPK_URL"
+        IPK_PATH="$TMPDIR/telemt.ipk"
+        if command -v wget >/dev/null 2>&1; then
+            wget -O "$IPK_PATH" "$LATEST_IPK_URL" || return 1
+        else
+            curl -fL -o "$IPK_PATH" "$LATEST_IPK_URL" || return 1
+        fi
+        echo "Extracting binary from ipk (config из ipk НЕ трогаем)..."
+        # ipk = gzip+tar с data.tar.gz
+        rm -rf "$TMPDIR/ipk_unpack"
+        mkdir -p "$TMPDIR/ipk_unpack"
+        tar -xzf "$IPK_PATH" -C "$TMPDIR/ipk_unpack" || return 1
+        if [ -f "$TMPDIR/ipk_unpack/data.tar.gz" ]; then
+            tar -xzf "$TMPDIR/ipk_unpack/data.tar.gz" -C "$TMPDIR/ipk_unpack" || return 1
+        elif [ -f "$TMPDIR/ipk_unpack/data.tar.xz" ]; then
+            tar -xJf "$TMPDIR/ipk_unpack/data.tar.xz" -C "$TMPDIR/ipk_unpack" || return 1
+        else
+            echo "ERROR: data.tar.* not found in ipk"
+            rm -rf "$TMPDIR"
+            return 1
+        fi
+        TELEMT_BIN=$(find "$TMPDIR/ipk_unpack" -type f -name telemt 2>/dev/null | head -n 1)
+        if [ -z "$TELEMT_BIN" ]; then
+            echo "ERROR: telemt binary not found in ipk!"
+            rm -rf "$TMPDIR"
+            return 1
+        fi
+        cp "$TELEMT_BIN" "$BIN_PATH"
+        chmod +x "$BIN_PATH"
+        echo "$_ver" > "$VERSION_FILE"
+        echo "Binary installed: $BIN_PATH ($_ver) [ipk]"
+        rm -rf "$TMPDIR"
+        return 0
+    fi
+
     echo "Downloading Telemt $_ver ($TELEMT_FILE)..."
-    mkdir -p "$TMPDIR"
     TARBALL_URL="https://github.com/telemt/telemt/releases/download/${_ver}/${TELEMT_FILE}"
     TARBALL_PATH="$TMPDIR/telemt.tar.gz"
     echo "  $TARBALL_URL"
-    wget -O "$TARBALL_PATH" "$TARBALL_URL"
+    if command -v wget >/dev/null 2>&1; then
+        wget -O "$TARBALL_PATH" "$TARBALL_URL" || return 1
+    else
+        curl -fL -o "$TARBALL_PATH" "$TARBALL_URL" || return 1
+    fi
     echo "Extracting..."
     tar -xzf "$TARBALL_PATH" -C "$TMPDIR"
     TELEMT_BIN=$(find "$TMPDIR" -maxdepth 2 -type f -name telemt 2>/dev/null | head -n 1)
@@ -136,10 +337,8 @@ download_and_install_binary() {
         rm -rf "$TMPDIR"
         return 1
     fi
-    mkdir -p /opt/usr/bin
     cp "$TELEMT_BIN" "$BIN_PATH"
     chmod +x "$BIN_PATH"
-    mkdir -p "$CONFIG_DIR"
     echo "$_ver" > "$VERSION_FILE"
     echo "Binary installed: $BIN_PATH ($_ver)"
     rm -rf "$TMPDIR"
