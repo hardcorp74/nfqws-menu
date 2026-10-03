@@ -639,18 +639,28 @@ echo ""
 echo "Конфиг не найден — полная установка."
 ensure_deps 1
 
-echo "Detecting public IP via ip route get..."
+echo "Detecting default route interface..."
 
-ROUTE_INFO=$(ip route get 1.1.1.1 2>/dev/null | head -n1)
-
-if [ -z "$ROUTE_INFO" ]; then
-    echo "ERROR: Cannot determine route to 1.1.1.1!"
-    exit 1
-fi
-
-DEF_IFACE=$(echo "$ROUTE_INFO" | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}')
+# НЕ используем «ip route get 1.1.1.1» — на Keenetic часто уходит в WARP/WG
+# (host-route 1.1.1.1 → nwg*), хотя default — ppp0.
+DEF_IFACE=$(ip -4 route show default 2>/dev/null | awk '
+    /^default/ {
+        for (i = 1; i <= NF; i++) if ($i == "dev") { print $(i + 1); exit }
+    }
+')
 if [ -z "$DEF_IFACE" ]; then
-    echo "ERROR: Cannot detect interface from ip route get!"
+    DEF_IFACE=$(ip route 2>/dev/null | awk '
+        /^default/ {
+            for (i = 1; i <= NF; i++) if ($i == "dev") { print $(i + 1); exit }
+        }
+    ')
+fi
+if [ -z "$DEF_IFACE" ]; then
+    # fallback: route -n
+    DEF_IFACE=$(route -n 2>/dev/null | awk '$1 == "0.0.0.0" { print $NF; exit }')
+fi
+if [ -z "$DEF_IFACE" ]; then
+    echo "ERROR: Cannot detect default route interface!"
     exit 1
 fi
 case "$DEF_IFACE" in
@@ -658,12 +668,16 @@ case "$DEF_IFACE" in
 esac
 echo "Default route interface: $DEF_IFACE"
 
-AUTO_IP=$(echo "$ROUTE_INFO" | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')
+# IP с интерфейса default route (не src из route get 1.1.1.1)
+AUTO_IP=$(ip -4 -o addr show dev "$DEF_IFACE" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | awk '!/^127\./ {print; exit}')
 if [ -z "$AUTO_IP" ]; then
-    echo "ERROR: Cannot detect source IP from ip route get!"
+    AUTO_IP=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -n1)
+fi
+if [ -z "$AUTO_IP" ]; then
+    echo "ERROR: Cannot detect WAN IP on $DEF_IFACE!"
     exit 1
 fi
-echo "Detected public IP: $AUTO_IP"
+echo "Detected WAN IP ($DEF_IFACE): $AUTO_IP"
 
 echo "Detecting TLS domain (ending with netcraze.io)..."
 AUTO_DOMAIN=$(ndmc -c 'ip http ssl acme list' 2>/dev/null | grep "domain:" | awk '{print $2}' | grep "netcraze.io" | head -n 1) || true
@@ -723,13 +737,16 @@ AUTH_HEADER=$(openssl rand -hex 32)
 echo "Generated auth_header: $AUTH_HEADER"
 
 echo "Выберите интерфейс, через который прокси будет выходить в мир"
-echo "(рекомендуется: $DEF_IFACE — default route к 1.1.1.1)"
+echo "(рекомендуется: $DEF_IFACE — default route)"
 
 _is_junk_iface() {
     case "$1" in
         lo|sit*|ip6tnl*|tunl*|gre*|gretap*|ethoip*|dummy*|ezcfg*|ntce*|xfrms*)
             return 0 ;;
         ra*|rai*|apcli*|apclii*)
+            return 0 ;;
+        br[0-9]*)
+            # LAN bridge — не для upstream
             return 0 ;;
         *)
             return 1 ;;
@@ -739,6 +756,67 @@ _is_junk_iface() {
 _get_ipv4() {
     ip -4 -o addr show dev "$1" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | \
         awk '!/^127\./ {print; exit}'
+}
+
+# RCI: description по IPv4 (http://127.0.0.1:79/rci/show/interface)
+_RCI_DESC_FILE="/tmp/telemt_rci_iface_desc.$$"
+rm -f "$_RCI_DESC_FILE"
+_rci_json=""
+if command -v curl >/dev/null 2>&1; then
+    _rci_json=$(curl -s --connect-timeout 2 --max-time 4 "http://127.0.0.1:79/rci/show/interface" 2>/dev/null) || true
+elif command -v wget >/dev/null 2>&1; then
+    _rci_json=$(wget -qO- -T 4 "http://127.0.0.1:79/rci/show/interface" 2>/dev/null) || true
+fi
+if [ -n "$_rci_json" ] && command -v jq >/dev/null 2>&1; then
+    # address|description (или interface-name / id)
+    printf '%s\n' "$_rci_json" | jq -r '
+        .. | objects |
+        select(has("address") and (.address | type == "string") and (.address | test("^[0-9]+\\."))) |
+        "\(.address)|\(if (.description // "") != "" then .description
+            elif (.["interface-name"] // "") != "" then .["interface-name"]
+            else (.id // "") end)"
+    ' 2>/dev/null | while IFS= read -r _line; do
+        [ -n "$_line" ] && printf '%s\n' "$_line"
+    done > "$_RCI_DESC_FILE" || true
+elif [ -n "$_rci_json" ]; then
+    # без jq: грубый разбор пар address + ближайший description
+    printf '%s\n' "$_rci_json" | awk '
+        /"address"[[:space:]]*:[[:space:]]*"[0-9]+\./ {
+            if (match($0, /[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/)) {
+                addr = substr($0, RSTART, RLENGTH)
+            }
+        }
+        /"description"[[:space:]]*:/ {
+            if (match($0, /"description"[[:space:]]*:[[:space:]]*"[^"]*"/)) {
+                line = substr($0, RSTART, RLENGTH)
+                sub(/.*"description"[[:space:]]*:[[:space:]]*"/, "", line)
+                sub(/".*/, "", line)
+                desc = line
+            }
+        }
+        /"interface-name"[[:space:]]*:/ {
+            if (desc == "" && match($0, /"interface-name"[[:space:]]*:[[:space:]]*"[^"]*"/)) {
+                line = substr($0, RSTART, RLENGTH)
+                sub(/.*"interface-name"[[:space:]]*:[[:space:]]*"/, "", line)
+                sub(/".*/, "", line)
+                iname = line
+            }
+        }
+        /^[[:space:]]*\}/ {
+            if (addr != "") {
+                d = desc
+                if (d == "") d = iname
+                if (d != "") print addr "|" d
+            }
+            addr = ""; desc = ""; iname = ""
+        }
+    ' > "$_RCI_DESC_FILE" 2>/dev/null || true
+fi
+
+_get_rci_desc() {
+    _ip="$1"
+    [ -n "$_ip" ] && [ -f "$_RCI_DESC_FILE" ] || { echo ""; return 0; }
+    awk -F'|' -v ip="$_ip" '$1 == ip { print $2; exit }' "$_RCI_DESC_FILE" 2>/dev/null
 }
 
 _IFACE_LIST=""
@@ -768,33 +846,63 @@ i=1
 for iface in $_IFACE_LIST; do
     [ -n "$iface" ] || continue
     _ip4=$(_get_ipv4 "$iface") || true
+    _desc=$(_get_rci_desc "$_ip4") || true
     _mark=""
     [ "$iface" = "$DEF_IFACE" ] && _mark=" ← default route"
+    _extra=""
+    [ -n "$_desc" ] && _extra=" — $_desc"
     if [ -n "$_ip4" ]; then
-        echo "  $i) $iface ($_ip4)$_mark"
+        echo "  $i) $iface ($_ip4)$_extra$_mark"
     else
-        echo "  $i) $iface$_mark"
+        echo "  $i) $iface$_extra$_mark"
     fi
     eval "iface_$i=\$iface"
     i=$((i+1))
 done
+rm -f "$_RCI_DESC_FILE" 2>/dev/null || true
 
 COUNT=$((i-1))
 if [ "$COUNT" -lt 1 ]; then
     echo "WARNING: не найдено подходящих интерфейсов, используем $DEF_IFACE"
     UP_IFACE="$DEF_IFACE"
 else
-    printf "Select upstream interface number (default 1 = %s): " "$DEF_IFACE"
-    read IFNUM || true
-    IFNUM=${IFNUM:-1}
-    if [ "$IFNUM" -ge 1 ] 2>/dev/null && [ "$IFNUM" -le "$COUNT" ] 2>/dev/null; then
-        eval "UP_IFACE=\$iface_$IFNUM"
+    printf "Интерфейс (номер 1-%s или имя, по умолчанию 1 = %s): " "$COUNT" "$DEF_IFACE"
+    read IFSEL || true
+    IFSEL=$(echo "${IFSEL:-1}" | tr -d ' \t\r')
+    UP_IFACE=""
+    # число из списка
+    if [ "$IFSEL" -ge 1 ] 2>/dev/null && [ "$IFSEL" -le "$COUNT" ] 2>/dev/null; then
+        eval "UP_IFACE=\$iface_$IFSEL"
     else
-        echo "Invalid number, using default: $DEF_IFACE"
-        UP_IFACE="$DEF_IFACE"
+        # имя интерфейса (eth3, ppp0, nwg1, ...)
+        case "$IFSEL" in
+            *@*) IFSEL=$(echo "$IFSEL" | cut -d'@' -f1) ;;
+        esac
+        # есть в нашем списке?
+        for iface in $_IFACE_LIST; do
+            if [ "$iface" = "$IFSEL" ]; then
+                UP_IFACE="$IFSEL"
+                break
+            fi
+        done
+        # вручную: проверяем существование в системе
+        if [ -z "$UP_IFACE" ]; then
+            if ip link show dev "$IFSEL" >/dev/null 2>&1; then
+                UP_IFACE="$IFSEL"
+                echo "Интерфейс $UP_IFACE принят (вне списка)."
+            else
+                echo "Интерфейс '$IFSEL' не найден — используем default: $DEF_IFACE"
+                UP_IFACE="$DEF_IFACE"
+            fi
+        fi
     fi
 fi
 UP_IFACE=${UP_IFACE:-$DEF_IFACE}
+# финальная проверка
+if ! ip link show dev "$UP_IFACE" >/dev/null 2>&1; then
+    echo "ERROR: интерфейс '$UP_IFACE' не существует в системе!"
+    exit 1
+fi
 echo "Selected interface: $UP_IFACE"
 
 while true; do
