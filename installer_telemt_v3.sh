@@ -307,8 +307,6 @@ EOF
 
 download_and_install_binary() {
     _ver="$1"
-    # ~10 MB + запас
-    check_opt_space 11000 || return 1
     mkdir -p "$TMPDIR" /opt/usr/bin "$CONFIG_DIR"
 
     if [ "${TELEMT_SOURCE:-github}" = "ipk" ]; then
@@ -331,7 +329,6 @@ download_and_install_binary() {
             curl -fL -o "$IPK_PATH" "$LATEST_IPK_URL" || { rm -f "$IPK_PATH"; return 1; }
         fi
         echo "opkg install $IPK_PATH ..."
-        check_opt_space 11000 || { rm -f "$IPK_PATH"; return 1; }
         # --force-reinstall: обновить уже стоящий пакет; conffiles сохранят config.toml
         if ! opkg install --force-reinstall "$IPK_PATH"; then
             echo "opkg install --force-reinstall failed, trying plain install..."
@@ -572,6 +569,12 @@ if [ -z "$LATEST_VER" ]; then
 fi
 echo "Latest version: $LATEST_VER"
 [ -n "$LOCAL_VER" ] && echo "Installed version: $LOCAL_VER" || echo "Installed version: (none)"
+
+# Сразу после определения версии — проверка места (перед любой установкой/обновлением)
+# Пропускаем только если бинарник уже актуален
+if ! [ -n "$LOCAL_VER" ] || [ "$LOCAL_VER" != "$LATEST_VER" ] || [ ! -x "$BIN_PATH" ]; then
+    check_opt_space 11000 || exit 1
+fi
 
 # =====================================================================
 # UPDATE PATH: config already exists — preserve it, only update binary

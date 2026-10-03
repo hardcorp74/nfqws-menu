@@ -283,8 +283,6 @@ EOF
 
 download_and_install_binary() {
     _ver="$1"
-    # ~11 MB installed-size + запас
-    check_opt_space 12000 || return 1
     mkdir -p "$TMPDIR" /opt/sbin "$PANEL_DIR"
 
     if [ "$PANEL_SOURCE" = "ipk" ]; then
@@ -300,7 +298,6 @@ download_and_install_binary() {
         IPK_PATH="/tmp/telemt-panel_$$.ipk"
         _http_download "$LATEST_IPK_URL" "$IPK_PATH" || { rm -f "$IPK_PATH"; return 1; }
         echo "opkg install $IPK_PATH ..."
-        check_opt_space 12000 || { rm -f "$IPK_PATH"; return 1; }
         # Depends: telemt — если telemt стоит бинарником без opkg-пакета, нужен --force-depends
         if ! opkg install --force-reinstall "$IPK_PATH"; then
             echo "retry: --force-reinstall --force-depends..."
@@ -435,6 +432,12 @@ if [ -z "$LATEST_VER" ]; then
 fi
 echo "Latest version: $LATEST_VER"
 [ -n "$LOCAL_VER" ] && echo "Installed version: $LOCAL_VER" || echo "Installed version: (none)"
+
+# Сразу после определения версии — проверка места (перед любой установкой/обновлением)
+# Пропускаем только если бинарник уже актуален
+if ! [ -n "$LOCAL_VER" ] || [ "$LOCAL_VER" != "$LATEST_VER" ] || [ ! -x "$BIN_PATH" ]; then
+    check_opt_space 12000 || exit 1
+fi
 
 # =====================================================================
 # UPDATE: config exists — preserve, update binary only
