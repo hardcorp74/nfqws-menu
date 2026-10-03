@@ -1,6 +1,6 @@
-> Обновление 1.10.2: добавлен ALT13, синхронизированы blobs и списки из бандла 1.10.2.
+> Обновление 1.10.3: добавлен ALT13, синхронизированы blobs и списки из бандла 1.10.2.
 
-# zapret-discord-youtube 1.10.2 → nfqws2
+# zapret-discord-youtube 1.10.3 → nfqws2
 
 21 стратегия из бандла, портированные под формат `nfqws2.conf`
 (пакет [nfqws2-keenetic](https://github.com/nfqws/nfqws2-keenetic), Entware/Keenetic/OpenWrt).
