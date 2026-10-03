@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.15"
+SCRIPT_VERSION="0.9.16"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -785,7 +785,7 @@ print_arch_line() {
   printf '\n'
 
   if [ "$RCI_HAS_NF_KMOD" = "0" ]; then
-    warn "Через web-интерфейс Keenetic/Netcraze установить пакет «Модули ядра подсистемы Netfilter» (OPKG → Kernel modules for Netfilter)."
+    printf '%s\n' "${RED}${BOLD}[!] Через web-интерфейс Keenetic/Netcraze установить пакет «Модули ядра подсистемы Netfilter» (OPKG → Kernel modules for Netfilter).${NC}"
   fi
 }
 
