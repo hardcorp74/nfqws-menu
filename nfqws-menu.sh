@@ -4692,9 +4692,9 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
-# 16. telemt / telemt-panel  (https://github.com/augin/telemt_script)
+# 16. telemt / telemt-panel  (installer_telemt_v3.sh in this repo; panel from augin)
 # ---------------------------------------------------------------------------
-TELEMT_INSTALL_URL="https://raw.githubusercontent.com/augin/telemt_script/main/installer_telemt_v2.sh"
+TELEMT_INSTALL_URL="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_telemt_v3.sh"
 TELEMT_PANEL_INSTALL_URL="https://raw.githubusercontent.com/augin/telemt_script/main/install_telemt-panel.sh"
 TELEMT_SYSTEMCTL_URL="https://raw.githubusercontent.com/anch665/keendev/main/systemctl.sh"
 TELEMT_JOURNALCTL_URL="https://raw.githubusercontent.com/anch665/keendev/main/journalctl.sh"
@@ -4709,10 +4709,7 @@ install_telemt() {
   echo
   info "Установка telemt"
   info "Источник: $TELEMT_INSTALL_URL"
-  info "Требуется: aarch64, curl, libnghttp2"
   echo
-  opkg update 2>/dev/null || true
-  opkg install curl libnghttp2 2>/dev/null || true
   mkdir -p /opt/tmp
   if command -v curl >/dev/null 2>&1; then
     curl -fsSL "$TELEMT_INSTALL_URL" -o /opt/tmp/install_telemt.sh || return 1
@@ -4810,8 +4807,9 @@ menu_telemt() {
     printf '%s\n' "${DIM}полностью реализует официальный алгоритм Telegram-прокси${NC}"
     printf '%s\n' "${DIM}и добавляет множество улучшений.${NC}"
     echo
-    printf '%s\n' "${DIM}Скрипты: https://github.com/augin/telemt_script${NC}"
-    printf '%s\n' "${DIM}(Entware / Keenetic, рекомендуется aarch64)${NC}"
+    printf '%s\n' "${DIM}Скрипт telemt: installer_telemt_v3.sh (этот репозиторий)${NC}"
+    printf '%s\n' "${DIM}panel: https://github.com/augin/telemt_script${NC}"
+    printf '%s\n' "${DIM}(Entware / Keenetic; aarch64, x86_64, mipsel, mips)${NC}"
     echo
     if is_telemt_installed; then
       _tm_st=""
