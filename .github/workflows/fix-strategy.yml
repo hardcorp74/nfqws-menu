@@ -1,0 +1,87 @@
+# Правки strategies/**/*.conf:
+#   1. Удаляет " \\" и " \" (пробел + обратные слэши) — полностью, без замены.
+#   2. Переименовывает blob-ссылки (по SHA256 совпадению):
+#        ACTIVE_DISCORD_UDP.bin → quic_initial_steamcommunity_com.bin
+#        ACTIVE_GAME_UDP.bin    → quic_initial_4pda_to.bin
+#
+# Триггеры: push в strategies/, ручной запуск.
+# Коммит только если что-то реально изменилось.
+
+name: Fix strategies
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "strategies/**/*.conf"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fix-strategy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Fix strategies (backslashes + ACTIVE_* blobs)
+        id: fix
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find strategies -type f -name '*.conf' | sort)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No .conf files found"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          changed=0
+          for f in "${files[@]}"; do
+            touched=0
+
+            # 1) Удаляем " \\" и " \" (пробел + любые подряд идущие \)
+            if grep -qE ' \\+' "$f" 2>/dev/null; then
+              sed -i -E 's/ \\+//g' "$f"
+              touched=1
+            fi
+
+            # 2) ACTIVE_* → оригинальные имена (по SHA256)
+            if grep -qE 'ACTIVE_(DISCORD|GAME)_UDP\.bin' "$f" 2>/dev/null; then
+              sed -i \
+                -e 's/ACTIVE_DISCORD_UDP\.bin/quic_initial_steamcommunity_com.bin/g' \
+                -e 's/ACTIVE_GAME_UDP\.bin/quic_initial_4pda_to.bin/g' \
+                "$f"
+              touched=1
+            fi
+
+            if [ "$touched" -eq 1 ] && ! git diff --quiet -- "$f"; then
+              echo "fixed: $f"
+              changed=1
+            fi
+          done
+
+          if [ "$changed" -eq 1 ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing to fix"
+          fi
+
+      - name: Commit and push if changed
+        if: steps.fix.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add strategies/
+          git commit -m "fix: strategies — backslashes + ACTIVE_* blobs [skip ci]"
+          git push
