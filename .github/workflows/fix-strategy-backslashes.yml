@@ -1,5 +1,7 @@
-# Убирает последовательность " \\" (пробел + два обратных слэша) из strategies/**/*.conf.
-# Полностью удаляет, не заменяет на один \.
+# Убирает из strategies/**/*.conf:
+#   - " \\"  (пробел + два обратных слэша)
+#   - " \"   (пробел + один обратный слэш)
+# Полностью удаляет, не заменяет.
 #
 # Триггеры: push в strategies/, ручной запуск.
 # Коммит только если что-то реально изменилось.
@@ -29,7 +31,7 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Remove " \\" (space + double backslash)
+      - name: Remove " \\" and " \" (space + backslash(es))
         id: fix
         run: |
           set -euo pipefail
@@ -42,10 +44,10 @@ jobs:
 
           changed=0
           for f in "${files[@]}"; do
-            # Ищем " \\" (пробел + два обратных слэша)
-            if grep -qF ' \\' "$f" 2>/dev/null; then
-              # Полностью удаляем " \\"
-              sed -i 's/ \\\\//g' "$f"
+            # Есть пробел + один или более обратных слэшей?
+            if grep -qE ' \\+' "$f" 2>/dev/null; then
+              # Удаляем " \\" и " \" (пробел + любые подряд идущие \)
+              sed -i -E 's/ \\+//g' "$f"
               if ! git diff --quiet -- "$f"; then
                 echo "fixed: $f"
                 changed=1
@@ -57,7 +59,7 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "No space+double-backslash found — nothing to fix"
+            echo "No space+backslash found — nothing to fix"
           fi
 
       - name: Commit and push if changed
@@ -68,5 +70,5 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git add strategies/
-          git commit -m "fix: remove space+double-backslash from strategies [skip ci]"
+          git commit -m "fix: remove space+backslash from strategies [skip ci]"
           git push
