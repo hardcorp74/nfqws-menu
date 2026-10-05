@@ -421,9 +421,15 @@ do_remove() {
     return 0
   fi
 
-  if ! confirm_yes "Удалить $PKG_NAME и связанные файлы?"; then
+  if ! confirm_yes "Удалить $PKG_NAME?"; then
     info "Отменено."
     return 0
+  fi
+
+  # один вопрос про конфиг: ответ уходит и в postrm пакета (Remove config?), и в rm ниже
+  remove_conf=0
+  if confirm_yes "Также удалить конфиг и сессию (/opt/etc/usque)?"; then
+    remove_conf=1
   fi
 
   if [ -x "$INIT_SCRIPT" ]; then
@@ -431,18 +437,29 @@ do_remove() {
   fi
 
   if is_pkg_installed; then
-    opkg remove --autoremove "$PKG_NAME" 2>/dev/null || opkg remove "$PKG_NAME" 2>/dev/null || true
+    # postrm пакета делает: echo "Remove config? y/N"; read yn
+    if [ "$remove_conf" = "1" ]; then
+      printf 'y\n' | opkg remove --autoremove "$PKG_NAME" 2>/dev/null \
+        || printf 'y\n' | opkg remove "$PKG_NAME" 2>/dev/null \
+        || true
+    else
+      printf 'N\n' | opkg remove --autoremove "$PKG_NAME" 2>/dev/null \
+        || printf 'N\n' | opkg remove "$PKG_NAME" 2>/dev/null \
+        || true
+    fi
     info "Пакет удалён через opkg."
   fi
 
   [ -f "$OPKG_CONF" ] && rm -f "$OPKG_CONF" && info "  удалён: $OPKG_CONF"
-  # конфиг и сессию оставляем по умолчанию — можно переустановить без re-register
-  if confirm_yes "Также удалить конфиг и сессию (/opt/etc/usque)?"; then
-    rm -rf /opt/etc/usque
-    info "  удалён каталог: /opt/etc/usque"
+
+  if [ "$remove_conf" = "1" ]; then
+    if [ -d /opt/etc/usque ]; then
+      rm -rf /opt/etc/usque
+      info "  удалён каталог: /opt/etc/usque"
+    fi
   fi
 
-  # бинарник мог остаться после ручного обновления
+  # бинарник мог остаться после ручного обновления п.2
   if [ -f "$USQUE_BIN" ] && ! is_pkg_installed; then
     rm -f "$USQUE_BIN" "${USQUE_BIN}.bak" 2>/dev/null || true
     info "  удалён: $USQUE_BIN"
