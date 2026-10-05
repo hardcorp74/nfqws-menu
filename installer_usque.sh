@@ -7,8 +7,6 @@
 #   sh installer_usque.sh
 #   curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_usque.sh | sh
 
-set -e
-
 echo "=== usque-keenetic installer (Entware / Keenetic) ==="
 
 # ANSI (portable для ash/BusyBox)
@@ -30,7 +28,8 @@ INIT_SCRIPT="/opt/etc/init.d/S51usque"
 CONF_FILE="/opt/etc/usque/usque.conf"
 
 # ---------------------------------------------------------------------------
-# Архитектура — как в nfqws-menu.sh (detect_arch / _arch_*)
+# Архитектура — логика как в nfqws-menu.sh (detect_arch / _arch_*)
+# Без set -e: на BusyBox ash «[ -n x ] && y» и пустые подстановки валят скрипт.
 # ---------------------------------------------------------------------------
 ARCH=""
 ARCH_RAW=""
@@ -76,7 +75,7 @@ _arch_from_opkg_conf() {
   conf="${1:-/opt/etc/opkg.conf}"
   [ -f "$conf" ] || return 0
 
-  name=$(grep -E '^[[:space:]]*arch[[:space:]]+' "$conf" 2>/dev/null | _arch_pick_best) || true
+  name=$(grep -E '^[[:space:]]*arch[[:space:]]+' "$conf" 2>/dev/null | _arch_pick_best)
   if [ -n "$name" ]; then
     printf '%s\n' "$name"
     return 0
@@ -96,29 +95,37 @@ _arch_from_opkg_conf() {
         ;;
     esac
   done < "$conf"
-  [ -n "$from_url" ] && printf '%s\n' "$from_url"
+  if [ -n "$from_url" ]; then
+    printf '%s\n' "$from_url"
+  fi
 }
 
 detect_arch() {
   um=""
   cand=""
+  ARCH=""
+  ARCH_RAW=""
+  ARCH_SOURCE=""
 
   # 1) opkg print-architecture
-  # || true — при set -e пустой/ненулевой код не валит скрипт (BusyBox ash)
-  ARCH_RAW=$(_arch_from_opkg) || true
+  ARCH_RAW=$(_arch_from_opkg)
   ARCH=$(_arch_normalize "$ARCH_RAW")
-  [ -n "$ARCH" ] && ARCH_SOURCE="opkg"
+  if [ -n "$ARCH" ]; then
+    ARCH_SOURCE="opkg"
+  fi
 
   # 2) /opt/etc/opkg.conf
   if [ -z "$ARCH" ]; then
-    ARCH_RAW=$(_arch_from_opkg_conf /opt/etc/opkg.conf) || true
+    ARCH_RAW=$(_arch_from_opkg_conf /opt/etc/opkg.conf)
     ARCH=$(_arch_normalize "$ARCH_RAW")
-    [ -n "$ARCH" ] && ARCH_SOURCE="conf"
+    if [ -n "$ARCH" ]; then
+      ARCH_SOURCE="conf"
+    fi
   fi
 
   # 3) uname -m (mips* не берём — на Keenetic врёт)
   if [ -z "$ARCH" ]; then
-    um=$(uname -m 2>/dev/null || true)
+    um=$(uname -m 2>/dev/null)
     case "$um" in
       mips|mipsel|mips64|mips64el|"") ;;
       *)
@@ -132,12 +139,16 @@ detect_arch() {
     esac
   fi
 
-  [ -z "$ARCH_SOURCE" ] && ARCH_SOURCE="none"
+  if [ -z "$ARCH_SOURCE" ]; then
+    ARCH_SOURCE="none"
+  fi
 }
 
 is_pkg_installed() {
-  opkg list-installed 2>/dev/null | grep -q "^${PKG_NAME} " || return 1
-  return 0
+  if opkg list-installed 2>/dev/null | grep -q "^${PKG_NAME} "; then
+    return 0
+  fi
+  return 1
 }
 
 ensure_repo() {
@@ -174,7 +185,9 @@ info "Архитектура: ${arch_col}${ARCH}${NC} (источник: $ARCH_S
 
 if is_pkg_installed; then
   info "Пакет $PKG_NAME уже установлен — обновление..."
-  ensure_repo || exit 1
+  if ! ensure_repo; then
+    exit 1
+  fi
   if opkg upgrade "$PKG_NAME"; then
     info "Обновление завершено."
   else
@@ -182,7 +195,9 @@ if is_pkg_installed; then
   fi
 else
   info "Пакет $PKG_NAME не установлен — установка..."
-  ensure_repo || exit 1
+  if ! ensure_repo; then
+    exit 1
+  fi
   if ! opkg install "$PKG_NAME"; then
     error "opkg install $PKG_NAME не удался."
     error "Проверьте: opkg update && opkg install $PKG_NAME"
