@@ -347,21 +347,52 @@ do_update_bin() {
   fi
   info "Скачано: ${sz} Б"
 
-  # Распаковка
-  if command -v unzip >/dev/null 2>&1; then
-    unzip -o -q "$zipfile" -d "$TMPDIR" || {
-      error "unzip не смог распаковать архив."
-      rm -rf "$TMPDIR"
-      return 1
-    }
-  elif command -v busybox >/dev/null 2>&1 && busybox unzip -h >/dev/null 2>&1; then
-    busybox unzip -o -q "$zipfile" -d "$TMPDIR" || {
-      error "busybox unzip не смог распаковать архив."
-      rm -rf "$TMPDIR"
-      return 1
-    }
-  else
-    error "Нужен unzip (opkg install unzip)."
+  # Распаковка (BusyBox unzip не умеет zip flag 8 / streaming)
+  extract_ok=0
+  if command -v python3 >/dev/null 2>&1; then
+    if python3 -c "import zipfile; zipfile.ZipFile(r'$zipfile').extractall(r'$TMPDIR')" 2>/dev/null; then
+      extract_ok=1
+      info "Распаковано через python3"
+    fi
+  fi
+  if [ "$extract_ok" != "1" ] && command -v python >/dev/null 2>&1; then
+    if python -c "import zipfile; zipfile.ZipFile(r'$zipfile').extractall(r'$TMPDIR')" 2>/dev/null; then
+      extract_ok=1
+      info "Распаковано через python"
+    fi
+  fi
+  # полный unzip (не symlink на busybox)
+  if [ "$extract_ok" != "1" ]; then
+    real_unzip=""
+    for u in /opt/bin/unzip /usr/bin/unzip unzip; do
+      if command -v "$u" >/dev/null 2>&1 || [ -x "$u" ]; then
+        # пропускаем busybox-обёртку
+        if "$u" -v 2>&1 | grep -qi busybox; then
+          continue
+        fi
+        real_unzip="$u"
+        break
+      fi
+    done
+    if [ -n "$real_unzip" ]; then
+      if "$real_unzip" -o -q "$zipfile" -d "$TMPDIR" 2>/dev/null; then
+        extract_ok=1
+        info "Распаковано через $real_unzip"
+      fi
+    fi
+  fi
+  # поставить Info-ZIP unzip и повторить
+  if [ "$extract_ok" != "1" ]; then
+    warn "BusyBox unzip не поддерживает этот архив — ставлю unzip..."
+    if opkg update >/dev/null 2>&1 && opkg install unzip >/dev/null 2>&1; then
+      if unzip -o -q "$zipfile" -d "$TMPDIR" 2>/dev/null; then
+        extract_ok=1
+        info "Распаковано через unzip (opkg)"
+      fi
+    fi
+  fi
+  if [ "$extract_ok" != "1" ]; then
+    error "Не удалось распаковать архив (нужен python3 или unzip: opkg install unzip)."
     rm -rf "$TMPDIR"
     return 1
   fi
