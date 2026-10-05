@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.17"
+SCRIPT_VERSION="0.9.18"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -1754,19 +1754,27 @@ detect_isp_interface() {
   echo "$iface"
 }
 
-# Проверка глобального IPv6 (2a00::/12) на интерфейсе.
-# Возвращает 0 (успех) если найден адрес вида 2a00*, иначе 1.
+# Проверка глобального IPv6 на интерфейсе (любой scope global, не только 2a00*).
+# $1 — один iface или несколько через пробел ("ppp0 eth3"): достаточно одного с global.
+# Возвращает 0 если найден, иначе 1.
 iface_has_global_ipv6() {
-  local iface="$1"
-  [ -z "$iface" ] && return 1
-  if command -v ip >/dev/null 2>&1; then
-    # ip -6: "inet6 2a00:...." scope global
-    ip -6 addr show dev "$iface" 2>/dev/null | grep -qE 'inet6[[:space:]]+2a00'
-    return $?
-  fi
-  # fallback: ifconfig (BusyBox) — "inet6 addr: 2a00:...."
-  ifconfig "$iface" 2>/dev/null | grep -qiE 'inet6[[:space:]]+addr:[[:space:]]*2a00'
-  return $?
+  local ifaces="$1" iface
+  [ -z "$ifaces" ] && return 1
+  for iface in $ifaces; do
+    [ -z "$iface" ] && continue
+    if command -v ip >/dev/null 2>&1; then
+      # любой inet6 … scope global (2a00, 2a02, 2606, 2001, …); без link/host
+      if ip -6 addr show dev "$iface" scope global 2>/dev/null | grep -qE 'inet6[[:space:]]+[0-9a-fA-F]'; then
+        return 0
+      fi
+    else
+      # ifconfig (BusyBox): "inet6 addr: 2a02:…/64 Scope:Global"
+      if ifconfig "$iface" 2>/dev/null | grep -qiE 'inet6.*Scope:Global'; then
+        return 0
+      fi
+    fi
+  done
+  return 1
 }
 
 # Записать ISP_INTERFACE="…" в conf (замена или вставка в начало).
@@ -1845,10 +1853,10 @@ fix_isp_interface() {
   info "=== Проверка IPv6 на $iface_for_v6 ==="
   if iface_has_global_ipv6 "$iface_for_v6"; then
     ipv6_val=1
-    info "Найден глобальный IPv6-адрес (2a00*) на $iface_for_v6 → IPV6_ENABLED=1"
+    info "Найден глобальный IPv6 (scope global) на $iface_for_v6 → IPV6_ENABLED=1"
   else
     ipv6_val=0
-    info "Глобальный IPv6 (2a00*) на $iface_for_v6 не найден → IPV6_ENABLED=0"
+    info "Глобальный IPv6 на $iface_for_v6 не найден → IPV6_ENABLED=0"
   fi
 
   current_ipv6=$(grep -E '^IPV6_ENABLED=' "$conf" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\r"' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
