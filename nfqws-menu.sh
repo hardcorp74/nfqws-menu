@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.19"
+SCRIPT_VERSION="0.9.20"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -605,14 +605,16 @@ blob_expected_sha256() {
 
 # Скачать install.sh во временный файл и запустить на реальном tty.
 # curl|sh отдаёт установщику stdin=pipe → интерактивное меню (awg и др.) не открывается.
+# Скачать и выполнить удалённый .sh. Опционально: $2 = min_bytes (по умолчанию 8000).
+# Для коротких установщиков (например installer_usque.sh ~5 КБ) передавать min=2000.
 run_remote_sh() {
-  local url="$1" tmp rc=0
+  local url="$1" min_bytes="${2:-8000}" tmp rc=0
   # Хвосты от Ctrl+C / обрыва SSH предыдущих запусков
   rm -f /tmp/nfqws-remote-*.sh 2>/dev/null || true
   tmp="/tmp/nfqws-remote-$$.sh"
   # Чистим tmp даже при SIGINT/EXIT (иначе файл остаётся в /tmp)
   trap 'rm -f /tmp/nfqws-remote-$$.sh 2>/dev/null; [ -n "${MENU_PID:-}" ] && trap "upd_cleanup" EXIT || trap - EXIT' EXIT INT TERM
-  if ! download_sh_validated "$url" "$tmp"; then
+  if ! download_sh_validated "$url" "$tmp" "$min_bytes"; then
     error "Не удалось скачать целый скрипт: $url"
     rm -f "$tmp"
     if [ -n "${MENU_PID:-}" ]; then trap 'upd_cleanup' EXIT; else trap - EXIT; fi
@@ -4631,7 +4633,8 @@ menu_usque_keenetic() {
   info "usque-keenetic"
   info "Источник: $USQUE_INSTALL_URL"
   echo
-  if ! run_remote_sh "$USQUE_INSTALL_URL"; then
+  # min=2000: installer_usque.sh ~5 КБ (дефолт download_sh_validated = 8000)
+  if ! run_remote_sh "$USQUE_INSTALL_URL" 2000; then
     error "Установщик usque-keenetic завершился с ошибкой."
     return 1
   fi
