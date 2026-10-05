@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.18"
+SCRIPT_VERSION="0.9.19"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -4623,34 +4623,20 @@ remove_tg_ws_proxy_rs() {
   return 0
 }
 
+# 13. usque-keenetic  (installer_usque.sh in this repo)
+USQUE_INSTALL_URL="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_usque.sh"
+
 menu_usque_keenetic() {
   echo
   info "usque-keenetic"
-  need_arch || return 1
-
-  if is_installed "usque-keenetic"; then
-    opkg_install_or_upgrade usque-keenetic
-  else
-    info "Пакет не установлен — установка..."
-    ensure_opkg_repo "usque-keenetic" "https://side-effect-tm.github.io/usque-keenetic/$ARCH"
-    info "Репозиторий: https://side-effect-tm.github.io/usque-keenetic/$ARCH"
-    opkg install usque-keenetic
-    info "Установка завершена."
+  info "Источник: $USQUE_INSTALL_URL"
+  echo
+  if ! run_remote_sh "$USQUE_INSTALL_URL"; then
+    error "Установщик usque-keenetic завершился с ошибкой."
+    return 1
   fi
-
-  echo
-  printf '%s\n' "${BOLD}Управление сервисом${NC}"
-  cat << 'EOF'
-/opt/etc/init.d/S51usque (start | stop | restart)
-EOF
-  echo
-  printf '%s\n' "${BOLD}Конфигурация${NC}"
-  echo "Файл конфигурации расположен по пути /opt/etc/usque/usque.conf"
-  cat << 'EOF'
-# Интерфейс. Определяется автоматически при установке.
-# Должен быть вида opkgtun*
-IFACE="opkgtun0"
-EOF
+  # обновить кэш opkg после установки/апгрейда пакета
+  refresh_opkg_cache 2>/dev/null || true
 }
 
 menu_magitrickle() {
