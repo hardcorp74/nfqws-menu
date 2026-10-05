@@ -46,16 +46,12 @@ sentry.io
 discord.net
 discordsez.com
 appsflyersdk.com
-gateway.discord.gg
-media.discordapp.net
 
 #cdnst.net
 #cellmaps.com
 #ekahau.cloud
 #ekahau.com
 
-cloudflare-ech.com
-encryptedsni.com
 cloudflare-ech.com
 encryptedsni.com
 cloudflareaccess.com
@@ -216,11 +212,6 @@ tiptop-vpn.com
 bytedapm.com
 muscdn.com
 musical.ly
-p16-tiktokcdn-com.akamaized.net
-roovza-launches.appsflyersdk.com
-roovza.inapps.appsflyersdk.com
-roovza.launches.appsflyersdk.com
-roovza.skadsdk.appsflyersdk.com
 tik-tokapi.com
 tiktok-minis.com
 tiktok-row.net
@@ -229,7 +220,6 @@ tiktokcdn-eu.com
 tiktokcdn-us.com
 tiktokcdn-us.com.edgesuite.net
 tiktokcdn.com
-tiktokcdn.com.akamaized.net
 tiktokcdn.com.edgesuite.net
 tiktokd.net
 tiktokd.org
@@ -299,7 +289,6 @@ mailsuite.com
 samlab.ws
 
 ru-board.com
-forum.ru-board.com
 
 coursera.org
 currenttime.tv
@@ -353,7 +342,6 @@ tfbnw.net
 thefacebook.com
 instagram.com
 cdninstagram.com
-www.instagram.com
 ig.me
 igcdn.com
 igsonar.com
