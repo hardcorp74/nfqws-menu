@@ -17,6 +17,7 @@ RED=$(printf '\033[0;31m')
 GREEN=$(printf '\033[0;32m')
 YELLOW=$(printf '\033[1;33m')
 CYAN=$(printf '\033[0;36m')
+BLUE=$(printf '\033[0;34m')
 BOLD=$(printf '\033[1m')
 DIM=$(printf '\033[2m')
 NC=$(printf '\033[0m')
@@ -454,6 +455,40 @@ do_remove() {
 # ---------------------------------------------------------------------------
 # Меню
 # ---------------------------------------------------------------------------
+# Кэш крайних версий (заполняется один раз за сессию)
+LATEST_PKG=""       # usque-keenetic VERSION (0.3.0)
+LATEST_PKG_USQUE="" # USQUE_VERSION в пакете (4.2.0)
+LATEST_BIN=""       # Diniboy1123/usque tag без v (4.2.1)
+LATEST_FETCHED=0
+
+fetch_latest_versions() {
+  if [ "$LATEST_FETCHED" = "1" ]; then
+    return 0
+  fi
+  LATEST_FETCHED=1
+
+  # пакет + вшитый usque: raw VERSION / USQUE_VERSION из репозитория
+  v=$(http_get_stdout "https://raw.githubusercontent.com/side-effect-tm/usque-keenetic/main/VERSION" 2>/dev/null | tr -d '\r\n' | head -1)
+  # отсекаем пустое и HTML-ошибки
+  if [ -n "$v" ] && ! printf '%s' "$v" | grep -q '<'; then
+    LATEST_PKG="$v"
+  fi
+  u=$(http_get_stdout "https://raw.githubusercontent.com/side-effect-tm/usque-keenetic/main/USQUE_VERSION" 2>/dev/null | tr -d '\r\n' | head -1)
+  if [ -n "$u" ] && ! printf '%s' "$u" | grep -q '<'; then
+    LATEST_PKG_USQUE="$u"
+  fi
+
+  # latest bin Diniboy
+  api=$(http_get_stdout "https://api.github.com/repos/${DINIBOY_REPO}/releases/latest" 2>/dev/null) || api=""
+  if [ -n "$api" ]; then
+    t=$(printf '%s' "$api" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+    t=$(printf '%s' "$t" | sed 's/^v//')
+    if [ -n "$t" ]; then
+      LATEST_BIN="$t"
+    fi
+  fi
+}
+
 show_status() {
   st=""
   if is_pkg_installed; then
@@ -472,13 +507,25 @@ show_status() {
       st="${st:+$st, }bin"
     fi
   fi
-  if [ -x "$INIT_SCRIPT" ]; then
-    st="${st:+$st, }init"
-  fi
   if [ -n "$st" ]; then
     info "Обнаружено: $st"
   else
     printf '%s\n' "${DIM}Не установлено${NC}"
+  fi
+}
+
+# Метка крайних версий для пунктов меню (синий + жирный)
+fmt_pkg_latest() {
+  if [ -n "$LATEST_PKG" ] && [ -n "$LATEST_PKG_USQUE" ]; then
+    printf ' %s%s[ %s / %s ]%s' "$BLUE" "$BOLD" "$LATEST_PKG" "$LATEST_PKG_USQUE" "$NC"
+  elif [ -n "$LATEST_PKG" ]; then
+    printf ' %s%s[ %s ]%s' "$BLUE" "$BOLD" "$LATEST_PKG" "$NC"
+  fi
+}
+
+fmt_bin_latest() {
+  if [ -n "$LATEST_BIN" ]; then
+    printf ' %s%s[%s]%s' "$BLUE" "$BOLD" "$LATEST_BIN" "$NC"
   fi
 }
 
@@ -498,9 +545,11 @@ main_menu() {
     printf '%s\n' "${DIM}(Entware / Keenetic; aarch64, mipsel, mips)${NC}"
     echo
     show_status
+    # крайние версии (тихо, один раз за сессию; при ошибке сети — без меток)
+    fetch_latest_versions 2>/dev/null || true
     echo
-    echo "  1) Установка (usque-keenetic / side-effect-tm)"
-    echo "  2) Обновление bin (usque / Diniboy1123)"
+    printf '  1) Установка (usque-keenetic)%s\n' "$(fmt_pkg_latest)"
+    printf '  2) Обновление bin (usque)%s\n' "$(fmt_bin_latest)"
     echo "  3) Удаление usque-keenetic"
     echo "  0) Выход"
     echo
