@@ -461,7 +461,16 @@ show_status() {
     st="пакет ${ver:-ok}"
   fi
   if [ -x "$USQUE_BIN" ]; then
-    st="${st:+$st, }bin"
+    # usque version → "usque version: v4.2.1"
+    bin_ver=$("$USQUE_BIN" version 2>/dev/null | sed -n 's/.*version:[[:space:]]*//p' | head -1)
+    if [ -z "$bin_ver" ]; then
+      bin_ver=$("$USQUE_BIN" --version 2>/dev/null | head -1)
+    fi
+    if [ -n "$bin_ver" ]; then
+      st="${st:+$st, }bin $bin_ver"
+    else
+      st="${st:+$st, }bin"
+    fi
   fi
   if [ -x "$INIT_SCRIPT" ]; then
     st="${st:+$st, }init"
