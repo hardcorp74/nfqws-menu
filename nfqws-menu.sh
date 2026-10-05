@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.20"
+SCRIPT_VERSION="0.9.21"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -4602,7 +4602,15 @@ remove_tg_ws_proxy_rs() {
   is_tg_ws_proxy_rs_installed || { warn "tg-ws-proxy-rs не установлен."; return 0; }
   [ -x "$TG_WS_PROXY_RS_INIT" ] && "$TG_WS_PROXY_RS_INIT" stop 2>/dev/null
   rm -f "$TG_WS_PROXY_RS_INIT" "$TG_WS_PROXY_RS_BIN"
-  info "tg-ws-proxy-rs удалён (конфиг и секрет оставлены в $TG_WS_PROXY_RS_CONF_DIR)."
+  info "tg-ws-proxy-rs удалён."
+  if [ -d "$TG_WS_PROXY_RS_CONF_DIR" ]; then
+    if confirm_no "Удалить конфиг и секрет ($TG_WS_PROXY_RS_CONF_DIR)?"; then
+      rm -rf "$TG_WS_PROXY_RS_CONF_DIR"
+      info "Каталог $TG_WS_PROXY_RS_CONF_DIR удалён."
+    else
+      info "Конфиг и секрет оставлены в $TG_WS_PROXY_RS_CONF_DIR."
+    fi
+  fi
   return 0
 }
 
