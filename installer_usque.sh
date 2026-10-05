@@ -10,8 +10,6 @@
 #   sh installer_usque.sh
 #   curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_usque.sh | sh
 
-echo "=== usque-keenetic installer (Entware / Keenetic) ==="
-
 # ANSI (portable для ash/BusyBox)
 RED=$(printf '\033[0;31m')
 GREEN=$(printf '\033[0;32m')
