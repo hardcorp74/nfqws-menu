@@ -3916,8 +3916,6 @@ menu_dpi_detector() {
     fi
     return 0
   fi
-  info "Источник: $DPI_DETECTOR_INSTALL_URL"
-  echo
   info "Запуск установщика..."
   run_remote_sh "$DPI_DETECTOR_INSTALL_URL" || return 1
   echo
@@ -3955,24 +3953,7 @@ menu_keenkit() {
     return 0
   fi
   info "KeenKit — установка"
-  info "Источник: $KEENKIT_INSTALL_URL"
-  echo
-  info "Запуск установщика..."
-  if command -v curl >/dev/null 2>&1; then
-    curl -L -s "$KEENKIT_INSTALL_URL" > /tmp/keenkit-install.sh || return 1
-  elif command -v wget >/dev/null 2>&1; then
-    wget -qO /tmp/keenkit-install.sh "$KEENKIT_INSTALL_URL" || return 1
-  else
-    error "Нужны curl или wget."
-    return 1
-  fi
-  if [ -c /dev/tty ]; then
-    sh /tmp/keenkit-install.sh < /dev/tty > /dev/tty 2>&1 || true
-  else
-    sh /tmp/keenkit-install.sh || true
-  fi
-  rm -f /tmp/keenkit-install.sh 2>/dev/null || true
-  drain_stdin
+  run_remote_sh "$KEENKIT_INSTALL_URL" || return 1
   info "Установщик KeenKit завершил работу."
 }
 
@@ -4631,8 +4612,6 @@ USQUE_INSTALL_URL="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/in
 menu_usque_keenetic() {
   echo
   info "usque-keenetic"
-  info "Источник: $USQUE_INSTALL_URL"
-  echo
   # min=2000: installer_usque.sh ~5 КБ (дефолт download_sh_validated = 8000)
   if ! run_remote_sh "$USQUE_INSTALL_URL" 2000; then
     error "Установщик usque-keenetic завершился с ошибкой."
@@ -4705,45 +4684,15 @@ is_telemt_installed() {
 install_telemt() {
   echo
   info "Установка telemt"
-  info "Источник: $TELEMT_INSTALL_URL"
-  echo
-  mkdir -p /opt/tmp
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$TELEMT_INSTALL_URL" -o /opt/tmp/install_telemt.sh || return 1
-  elif command -v wget >/dev/null 2>&1; then
-    wget -qO /opt/tmp/install_telemt.sh "$TELEMT_INSTALL_URL" || return 1
-  else
-    error "Нужны curl или wget."
-    return 1
-  fi
-  if [ -c /dev/tty ]; then
-    sh /opt/tmp/install_telemt.sh < /dev/tty > /dev/tty 2>&1 || true
-  else
-    sh /opt/tmp/install_telemt.sh || true
-  fi
-  drain_stdin
+  # min=2000 — короткий установщик; URL один раз через «Пробуем:» в download_file
+  run_remote_sh "$TELEMT_INSTALL_URL" 2000 || return 1
   info "Установщик telemt завершил работу."
 }
 
 install_telemt_panel() {
   echo
   info "Установка telemt-panel"
-  info "Источник: $TELEMT_PANEL_INSTALL_URL"
-  echo
-  mkdir -p /opt/tmp
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$TELEMT_PANEL_INSTALL_URL" -o /opt/tmp/install_telemt-panel.sh || return 1
-  elif command -v wget >/dev/null 2>&1; then
-    wget -qO /opt/tmp/install_telemt-panel.sh "$TELEMT_PANEL_INSTALL_URL" || return 1
-  else
-    error "Нужны curl или wget."
-    return 1
-  fi
-  if [ -c /dev/tty ]; then
-    sh /opt/tmp/install_telemt-panel.sh < /dev/tty > /dev/tty 2>&1 || true
-  else
-    sh /opt/tmp/install_telemt-panel.sh || true
-  fi
+  run_remote_sh "$TELEMT_PANEL_INSTALL_URL" 2000 || return 1
   drain_stdin
   info "Установщик telemt-panel завершил работу."
 }
