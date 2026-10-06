@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.24"
+SCRIPT_VERSION="0.9.25"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -424,7 +424,8 @@ download_file() {
 
   for alt in $(github_alt_urls "$url"); do
     rm -f "$dest"
-    [ "$validate_sh" -eq 1 ] && info "Пробуем: $alt" >&2
+    # Только fallback-зеркала (основной URL уже в «Источник:»)
+    [ "$validate_sh" -eq 1 ] && [ "$alt" != "$url" ] && info "Пробуем зеркало: $alt" >&2
     if [ "$progress" -eq 1 ]; then
       _http_get_file_progress "$alt" "$dest" || continue
     else
