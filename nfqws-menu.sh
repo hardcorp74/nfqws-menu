@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.25"
+SCRIPT_VERSION="0.9.26"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -5906,6 +5906,8 @@ ensure_menu_symlink() {
     case "$SCRIPT_PATH" in /opt/*) target="$SCRIPT_PATH" ;; esac
   fi
   [ -f "$target" ] || return 0
+  # curl -o сбрасывает +x — всегда восстанавливаем, иначе menu → Permission denied
+  chmod +x "$target" 2>/dev/null || true
   [ -d /opt/bin ] || mkdir -p /opt/bin 2>/dev/null || return 0
   if [ -L "$link" ]; then
     cur=$(readlink "$link" 2>/dev/null || true)
@@ -5913,7 +5915,6 @@ ensure_menu_symlink() {
   fi
   [ -e "$link" ] && [ ! -L "$link" ] && return 0
   ln -sf "$target" "$link" 2>/dev/null || true
-  [ -L "$link" ] && chmod +x "$link" 2>/dev/null || true
 }
 
 ensure_menu_symlink
