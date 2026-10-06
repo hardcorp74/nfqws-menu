@@ -4676,12 +4676,12 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
-# 16. telemt / telemt-panel  (installer_telemt_v3.sh + install_telemt-panel.sh in this repo)
+# 15. telemt / telemt-panel — installer_telemt.sh
 # ---------------------------------------------------------------------------
-TELEMT_INSTALL_URL="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_telemt_v3.sh"
-TELEMT_PANEL_INSTALL_URL="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/install_telemt-panel.sh"
+TELEMT_BUNDLE_URL="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_telemt.sh"
 TELEMT_SYSTEMCTL_URL="https://raw.githubusercontent.com/anch665/keendev/main/systemctl.sh"
 TELEMT_JOURNALCTL_URL="https://raw.githubusercontent.com/anch665/keendev/main/journalctl.sh"
+
 
 is_telemt_installed() {
   [ -x /opt/usr/bin/telemt ] || [ -x /opt/etc/init.d/S99telemt ] || \
@@ -4689,119 +4689,29 @@ is_telemt_installed() {
     [ -x /opt/etc/init.d/S99telemt-panel ] || [ -d /opt/etc/telemt-panel ]
 }
 
-install_telemt() {
-  echo
-  info "Установка telemt"
-  # min=2000 — короткий установщик; URL один раз через «Пробуем:» в download_file
-  run_remote_sh "$TELEMT_INSTALL_URL" 2000 || return 1
-  info "Установщик telemt завершил работу."
-}
-
-install_telemt_panel() {
-  echo
-  info "Установка telemt-panel"
-  # выбор версии (5 релизов / Pre-release) — внутри install_telemt-panel.sh
-  run_remote_sh "$TELEMT_PANEL_INSTALL_URL" 2000 || return 1
-  drain_stdin
-  info "Установщик telemt-panel завершил работу."
-}
-
-install_telemt_systemd_emu() {
-  echo
-  info "Эмуляция systemD (systemctl / journalctl) для панели и логов"
-  info "systemctl:  $TELEMT_SYSTEMCTL_URL"
-  info "journalctl: $TELEMT_JOURNALCTL_URL"
-  echo
-  mkdir -p /opt/usr/bin
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$TELEMT_SYSTEMCTL_URL" -o /opt/usr/bin/systemctl || return 1
-    curl -fsSL "$TELEMT_JOURNALCTL_URL" -o /opt/usr/bin/journalctl || return 1
-  elif command -v wget >/dev/null 2>&1; then
-    wget -qO /opt/usr/bin/systemctl "$TELEMT_SYSTEMCTL_URL" || return 1
-    wget -qO /opt/usr/bin/journalctl "$TELEMT_JOURNALCTL_URL" || return 1
-  else
-    error "Нужны curl или wget."
-    return 1
-  fi
-  chmod +x /opt/usr/bin/systemctl /opt/usr/bin/journalctl
-  if [ -x /opt/etc/init.d/S99telemt-panel ]; then
-    /opt/etc/init.d/S99telemt-panel restart 2>/dev/null || true
-    info "S99telemt-panel перезапущен."
-  else
-    warn "S99telemt-panel не найден — перезапуск пропущен."
-  fi
-  info "Эмуляция systemD установлена: /opt/usr/bin/systemctl, /opt/usr/bin/journalctl"
-}
-
 remove_telemt() {
   echo
   info "Удаление telemt / telemt-panel..."
   /opt/etc/init.d/S99telemt-panel stop 2>/dev/null || true
   /opt/etc/init.d/S99telemt stop 2>/dev/null || true
-  rm -f /opt/etc/init.d/S99telemt
-  rm -f /opt/etc/init.d/S99telemt-panel
-  rm -f /opt/usr/bin/telemt
-  rm -f /opt/sbin/telemt-panel
-  rm -rf /opt/etc/telemt
-  rm -rf /opt/etc/telemt-panel
-  rm -rf /opt/tmp/telemt_dl
-  rm -rf /opt/tmp/telemt-panel-install
-  rm -f /tmp/log/telemt.log
-  rm -f /tmp/cache/beobachten.txt
+  rm -f /opt/etc/init.d/S99telemt /opt/etc/init.d/S99telemt-panel
+  rm -f /opt/usr/bin/telemt /opt/sbin/telemt-panel
+  rm -rf /opt/etc/telemt /opt/etc/telemt-panel
+  rm -rf /opt/tmp/telemt_dl /opt/tmp/telemt-panel-install
+  rm -rf /tmp/telemt_dl /tmp/telemt-panel-dl
+  rm -f /tmp/log/telemt.log /tmp/cache/beobachten.txt
   info "telemt / telemt-panel удалены."
 }
 
 menu_telemt() {
-  while true; do
-    clear 2>/dev/null || true
-    printf '%s\n' "${CYAN}================================================${NC}"
-    printf '%s\n' "${CYAN}${BOLD}           telemt / telemt-panel${NC}"
-    printf '%s\n' "${CYAN}================================================${NC}"
-    echo
-    printf '%s\n' "${DIM}Telemt — быстрый, безопасный и функциональный сервер на Rust:${NC}"
-    printf '%s\n' "${DIM}полностью реализует официальный алгоритм Telegram-прокси${NC}"
-    printf '%s\n' "${DIM}и добавляет множество улучшений.${NC}"
-    echo
-    printf '%s\n' "${DIM}Скрипты: installer_telemt_v3.sh, install_telemt-panel.sh (этот репозиторий)${NC}"
-    printf '%s\n' "${DIM}panel upstream: https://github.com/amirotin/telemt_panel${NC}"
-    printf '%s\n' "${DIM}(Entware / Keenetic; aarch64, x86_64, mipsel, mips)${NC}"
-    echo
-    if is_telemt_installed; then
-      _tm_st=""
-      { [ -x /opt/usr/bin/telemt ] || [ -x /opt/etc/init.d/S99telemt ]; } && _tm_st="${_tm_st}telemt "
-      { [ -x /opt/sbin/telemt-panel ] || [ -x /opt/etc/init.d/S99telemt-panel ]; } && _tm_st="${_tm_st}telemt-panel "
-      [ -x /opt/usr/bin/systemctl ] && _tm_st="${_tm_st}systemctl "
-      info "Обнаружено: ${_tm_st:-частично}"
-      echo
-    fi
-    echo "  1. Установка telemt"
-    echo "  2. Установка telemt-panel"
-    echo "  3. Эмуляция systemD"
-    echo "  4. Удаление"
-    echo "  0. Назад"
-    echo
-    ask "Выбор: "
-    read_menu tchoice
-    case "$tchoice" in
-      1) install_telemt || true ;;
-      2) install_telemt_panel || true ;;
-      3) install_telemt_systemd_emu || true ;;
-      4)
-        if confirm_no "Удалить telemt и telemt-panel?"; then
-          remove_telemt || true
-        else
-          info "Отменено."
-        fi
-        ;;
-      0|"") return 0 ;;
-      *) warn "Неверный пункт" ;;
-    esac
-    drain_stdin
-    echo
-    ask "$LBL_BACK"
-    read_menu _
-  done
+  echo
+  info "telemt / telemt-panel"
+  info "Источник: $TELEMT_BUNDLE_URL"
+  # единое меню: telemt, panel, systemD emu, удаление
+  run_remote_sh "$TELEMT_BUNDLE_URL" 2000 || return 1
+  info "Меню telemt завершило работу."
 }
+
 
 # ---------------------------------------------------------------------------
 # 88. Удаление
