@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.21"
+SCRIPT_VERSION="0.9.23"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -4700,6 +4700,7 @@ install_telemt() {
 install_telemt_panel() {
   echo
   info "Установка telemt-panel"
+  # выбор версии (5 релизов / Pre-release) — внутри install_telemt-panel.sh
   run_remote_sh "$TELEMT_PANEL_INSTALL_URL" 2000 || return 1
   drain_stdin
   info "Установщик telemt-panel завершил работу."

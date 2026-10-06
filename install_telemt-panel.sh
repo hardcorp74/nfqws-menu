@@ -8,6 +8,7 @@ echo "=== telemt-panel installer for Entware (nfqws-menu) ==="
 # ANSI
 RED=$(printf '\033[0;31m')
 GREEN=$(printf '\033[0;32m')
+YELLOW=$(printf '\033[1;33m')
 BOLD=$(printf '\033[1m')
 NC=$(printf '\033[0m')
 
@@ -416,20 +417,116 @@ HAS_BIN=0
 [ -x "$BIN_PATH" ] && HAS_BIN=1
 
 LOCAL_VER=$(get_local_version)
-# Версия из меню nfqws (TELEMT_PANEL_VERSION) или latest
+
+# --- 5 последних релизов GitHub (включая Pre-release) ---
+# stdout: "tag prerelease" (0|1)
+list_panel_releases() {
+    _json=""
+    for _url in \
+        "https://api.github.com/repos/$GITHUB_REPO/releases?per_page=8" \
+        "https://ghproxy.net/https://api.github.com/repos/$GITHUB_REPO/releases?per_page=8"
+    do
+        _json=$(_http_get "$_url") || _json=""
+        [ -n "$_json" ] || continue
+        case "$_json" in *'"message":'*) continue ;; esac
+        printf '%s\n' "$_json" | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"[^"]+"|"prerelease"[[:space:]]*:[[:space:]]*(true|false)' | \
+        {
+            _tag=""; _n=0
+            while IFS= read -r _line || [ -n "$_line" ]; do
+                case "$_line" in
+                    *'"tag_name"'*)
+                        _tag=$(printf '%s' "$_line" | sed -n 's/.*"\([^"]*\)"$/\1/p')
+                        ;;
+                    *'"prerelease"'*)
+                        if [ -n "$_tag" ]; then
+                            case "$_line" in
+                                *true*) printf '%s 1\n' "$_tag" ;;
+                                *)      printf '%s 0\n' "$_tag" ;;
+                            esac
+                            _tag=""
+                            _n=$((_n + 1))
+                            [ "$_n" -ge 5 ] && break
+                        fi
+                        ;;
+                esac
+            done
+        }
+        return 0
+    done
+    return 1
+}
+
+# Выбор версии → LATEST_VER. Отмена → exit 0.
+pick_panel_version() {
+    _tmp="/tmp/telemt-panel-rels-$$"
+    _list=$(list_panel_releases 2>/dev/null) || _list=""
+    if [ -z "$_list" ]; then
+        echo "WARNING: не удалось получить список релизов GitHub — будет latest."
+        LATEST_VER=""
+        rm -f "$_tmp"
+        return 0
+    fi
+    printf '%s\n' "$_list" | head -5 > "$_tmp"
+    _latest_stable=$(awk '$2==0 {print $1; exit}' "$_tmp")
+
+    echo ""
+    printf '%s\n' "${BOLD}Выберите версию telemt-panel:${NC}"
+    _i=1
+    while IFS=' ' read -r _tag _pre; do
+        [ -n "$_tag" ] || continue
+        if [ "$_pre" = "1" ]; then
+            printf '  %d. %s%s%s  %s(Pre-release)%s\n' "$_i" "$YELLOW" "$_tag" "$NC" "$YELLOW" "$NC"
+        elif [ -n "$_latest_stable" ] && [ "$_tag" = "$_latest_stable" ]; then
+            printf '  %d. %s%s%s  %s(Release — Latest)%s\n' "$_i" "$GREEN" "$_tag" "$NC" "$GREEN" "$NC"
+        else
+            printf '  %d. %s  (Release)\n' "$_i" "$_tag"
+        fi
+        _i=$((_i + 1))
+    done < "$_tmp"
+    echo "  0. Отмена"
+    echo ""
+    printf "Номер версии [1]: "
+    read _choice || true
+    case "$_choice" in
+        "") _choice=1 ;;
+        0|q|Q)
+            rm -f "$_tmp"
+            echo "Отменено."
+            exit 0
+            ;;
+    esac
+    if ! echo "$_choice" | grep -qE '^[0-9]+$' || [ "$_choice" -lt 1 ] || [ "$_choice" -gt 5 ]; then
+        rm -f "$_tmp"
+        echo "ERROR: неверный выбор."
+        exit 1
+    fi
+    LATEST_VER=$(sed -n "${_choice}p" "$_tmp" | awk '{print $1}')
+    rm -f "$_tmp"
+    if [ -z "$LATEST_VER" ]; then
+        echo "ERROR: версия не найдена."
+        exit 1
+    fi
+    echo "Выбрана версия: $LATEST_VER"
+    return 0
+}
+
+# Внешний override (env) или интерактивный выбор
 if [ -n "${TELEMT_PANEL_VERSION:-}" ]; then
     LATEST_VER="$TELEMT_PANEL_VERSION"
-    echo "Requested version: $LATEST_VER (from menu)"
+    echo "Requested version: $LATEST_VER (TELEMT_PANEL_VERSION)"
 else
-    if [ "$PANEL_SOURCE" = "ipk" ]; then
-        echo "Detecting latest telemt-panel from $PANEL_IPK_BASE ..."
-    else
-        echo "Detecting latest telemt-panel from GitHub ($GITHUB_REPO)..."
-    fi
-    LATEST_VER=$(get_latest_version)
+    pick_panel_version
     if [ -z "$LATEST_VER" ]; then
-        ensure_deps 1
+        if [ "$PANEL_SOURCE" = "ipk" ]; then
+            echo "Detecting latest telemt-panel from $PANEL_IPK_BASE ..."
+        else
+            echo "Detecting latest telemt-panel from GitHub ($GITHUB_REPO)..."
+        fi
         LATEST_VER=$(get_latest_version)
+        if [ -z "$LATEST_VER" ]; then
+            ensure_deps 1
+            LATEST_VER=$(get_latest_version)
+        fi
     fi
 fi
 if [ -z "$LATEST_VER" ]; then
