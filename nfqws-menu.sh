@@ -5794,9 +5794,9 @@ main_menu() {
   while true; do
     clear 2>/dev/null || true
     echo
-    printf '%s\n' "${BOLD}${BLUE}========================================${NC}"
-    printf '%s\n' "${BOLD}${BLUE}    NFQWS-MENU (Entware)  v${SCRIPT_VERSION}$(upd_mark menu)${NC}"
-    printf '%s\n' "${BOLD}${BLUE}========================================${NC}"
+    printf '%s\n' "${CYAN}========================================${NC}"
+    printf '%s\n' "${CYAN}${BOLD}    NFQWS-MENU (Entware)  v${SCRIPT_VERSION}$(upd_mark menu)${NC}"
+    printf '%s\n' "${CYAN}========================================${NC}"
     detect_arch
     show_installed
     upd_legend
