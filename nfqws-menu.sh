@@ -1028,11 +1028,25 @@ show_installed() {
 "
   fi
   if [ -x /opt/usr/bin/telemt ] || [ -x /opt/etc/init.d/S99telemt ] || [ -d /opt/etc/telemt ]; then
-    extras="${extras}tool|telemt|ok|telemt
+    _tm_ver=""
+    [ -f /opt/etc/telemt/.version ] && _tm_ver=$(head -n1 /opt/etc/telemt/.version 2>/dev/null | tr -d ' \r\n')
+    case "$_tm_ver" in v*|V*) _tm_ver=$(printf '%s' "$_tm_ver" | sed 's/^[vV]//') ;; esac
+    if [ -z "$_tm_ver" ] && [ -x /opt/usr/bin/telemt ]; then
+      _tm_ver=$(/opt/usr/bin/telemt --version 2>/dev/null | head -n1 | sed -n 's/.*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')
+    fi
+    extras="${extras}tool|telemt|${_tm_ver:-ok}|telemt
 "
   fi
   if [ -x /opt/sbin/telemt-panel ] || [ -x /opt/etc/init.d/S99telemt-panel ] || [ -d /opt/etc/telemt-panel ]; then
-    extras="${extras}tool|telemt-panel|ok|telemt-panel
+    _tp_ver=""
+    # GitHub/бинарник — не в opkg; версия только из .version (пишет установщик)
+    [ -f /opt/etc/telemt-panel/.version ] && _tp_ver=$(head -n1 /opt/etc/telemt-panel/.version 2>/dev/null | tr -d ' \r\n')
+    case "$_tp_ver" in v*|V*) _tp_ver=$(printf '%s' "$_tp_ver" | sed 's/^[vV]//') ;; esac
+    if [ -z "$_tp_ver" ]; then
+      _tp_ver=$(opkg list-installed 2>/dev/null | awk '/^telemt-panel[ -]/{print $3; exit}')
+      case "$_tp_ver" in *-* ) _tp_ver=$(printf '%s' "$_tp_ver" | cut -d- -f1) ;; esac
+    fi
+    extras="${extras}tool|telemt-panel|${_tp_ver:-ok}|telemt-panel
 "
   fi
   # awg без opkg-пакета, но с каталогом

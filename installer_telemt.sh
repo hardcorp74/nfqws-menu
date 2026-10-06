@@ -1356,14 +1356,15 @@ check_opt_space() {
 
 get_local_version() {
     if [ -f "$VERSION_FILE" ]; then
-        cat "$VERSION_FILE" 2>/dev/null | head -n1 | tr -d ' \r\n'
+        ver=$(cat "$VERSION_FILE" 2>/dev/null | head -n1 | tr -d ' \r\n')
+        case "$ver" in v*|V*) ver=$(printf '%s' "$ver" | sed 's/^[vV]//') ;; esac
+        echo "$ver"
         return
     fi
-    if [ -x "$BIN_PATH" ]; then
-        ver=$("$BIN_PATH" --version 2>/dev/null | head -n1 | sed -n 's/.*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')
-        [ -n "$ver" ] && echo "$ver" && return
-    fi
-    echo ""
+    # telemt-panel не поддерживает --version
+    ver=$(opkg list-installed 2>/dev/null | awk '/^telemt-panel[ -]/{print $3; exit}') || true
+    case "$ver" in *-* ) ver=$(printf '%s' "$ver" | cut -d- -f1) ;; esac
+    echo "${ver:-}"
 }
 
 get_latest_ipk_meta() {
@@ -1406,16 +1407,16 @@ get_latest_ipk_meta() {
 }
 
 get_latest_version() {
+    ver=""
     if [ "$PANEL_SOURCE" = "ipk" ]; then
         if get_latest_ipk_meta; then
-            echo "$LATEST_VER"
-            return 0
+            ver="$LATEST_VER"
         fi
-        echo ""
-        return 0
+    else
+        ver=$(_http_get "https://api.github.com/repos/$GITHUB_REPO/releases/latest" | \
+            grep '"tag_name"' | head -n1 | cut -d '"' -f 4) || true
     fi
-    ver=$(_http_get "https://api.github.com/repos/$GITHUB_REPO/releases/latest" | \
-        grep '"tag_name"' | head -n1 | cut -d '"' -f 4) || true
+    case "$ver" in v*|V*) ver=$(printf '%s' "$ver" | sed 's/^[vV]//') ;; esac
     echo "$ver"
 }
 
@@ -1472,8 +1473,9 @@ download_and_install_binary() {
             echo "ERROR: binary missing after opkg install"
             return 1
         fi
-        echo "$_ver" > "$VERSION_FILE"
-        echo "Package installed: telemt-panel $_ver [opkg/ipk]"
+        _wv=$(printf '%s' "$_ver" | sed 's/^[vV]//')
+        echo "$_wv" > "$VERSION_FILE"
+        echo "Package installed: telemt-panel $_wv [opkg/ipk]"
         rm -rf "$TMPDIR"
         return 0
     fi
@@ -1495,8 +1497,9 @@ download_and_install_binary() {
     fi
     cp "$BINARY" "$BIN_PATH"
     chmod +x "$BIN_PATH"
-    echo "$_ver" > "$VERSION_FILE"
-    echo "Binary installed: $BIN_PATH ($_ver)"
+    _wv=$(printf '%s' "$_ver" | sed 's/^[vV]//')
+    echo "$_wv" > "$VERSION_FILE"
+    echo "Binary installed: $BIN_PATH ($_wv)"
     rm -rf "$TMPDIR"
     return 0
 }
