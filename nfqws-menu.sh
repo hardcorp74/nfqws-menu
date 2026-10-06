@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.23"
+SCRIPT_VERSION="0.9.24"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -603,35 +603,56 @@ blob_expected_sha256() {
   ' "$BLOBS_SHA256SUMS_CACHE" 2>/dev/null
 }
 
-# Скачать install.sh во временный файл и запустить на реальном tty.
-# curl|sh отдаёт установщику stdin=pipe → интерактивное меню (awg и др.) не открывается.
-# Скачать и выполнить удалённый .sh. Опционально: $2 = min_bytes (по умолчанию 8000).
-# Для коротких установщиков (например installer_usque.sh ~5 КБ) передавать min=2000.
+# ---------------------------------------------------------------------------
+# Удалённые .sh: скачать (validated) + выполнить на полном tty
+# ---------------------------------------------------------------------------
+# $1=url  [$2=min_bytes, по умолчанию 8000; для коротких installers — 2000]
+_run_remote_sh_restore_traps() {
+  if [ -n "${MENU_PID:-}" ]; then
+    trap 'upd_cleanup' EXIT
+  else
+    trap - EXIT
+  fi
+  trap - INT TERM
+}
+
 run_remote_sh() {
   local url="$1" min_bytes="${2:-8000}" tmp rc=0
-  # Хвосты от Ctrl+C / обрыва SSH предыдущих запусков
   rm -f /tmp/nfqws-remote-*.sh 2>/dev/null || true
   tmp="/tmp/nfqws-remote-$$.sh"
-  # Чистим tmp даже при SIGINT/EXIT (иначе файл остаётся в /tmp)
-  trap 'rm -f /tmp/nfqws-remote-$$.sh 2>/dev/null; [ -n "${MENU_PID:-}" ] && trap "upd_cleanup" EXIT || trap - EXIT' EXIT INT TERM
+  trap 'rm -f /tmp/nfqws-remote-$$.sh 2>/dev/null; _run_remote_sh_restore_traps' EXIT INT TERM
+
   if ! download_sh_validated "$url" "$tmp" "$min_bytes"; then
     error "Не удалось скачать целый скрипт: $url"
     rm -f "$tmp"
-    if [ -n "${MENU_PID:-}" ]; then trap 'upd_cleanup' EXIT; else trap - EXIT; fi
-    trap - INT TERM
+    _run_remote_sh_restore_traps
     return 1
   fi
-  # Полный tty: stdin+stdout+stderr — иначе awg-menu / интерактив не поднимается
+
+  # Полный tty — иначе интерактив (awg-menu и т.п.) не поднимается
   if [ -c /dev/tty ]; then
     sh "$tmp" < /dev/tty > /dev/tty 2>&1 || rc=$?
   else
     sh "$tmp" || rc=$?
   fi
   rm -f "$tmp"
-  if [ -n "${MENU_PID:-}" ]; then trap 'upd_cleanup' EXIT; else trap - EXIT; fi
-  trap - INT TERM
+  _run_remote_sh_restore_traps
   drain_stdin
   return "$rc"
+}
+
+# Единый формат пункта меню → удалённый установщик:
+#   [+] Открываем: 11. awg-manager
+#   [+] Источник: https://...
+#   ================================================
+# $1=номер  $2=название  $3=url  [$4=min_bytes]
+run_menu_remote_sh() {
+  local num="$1" name="$2" url="$3" min_bytes="${4:-8000}"
+  echo
+  info "Открываем: ${num}. ${name}"
+  info "Источник: $url"
+  printf '%s\n' "================================================"
+  run_remote_sh "$url" "$min_bytes"
 }
 
 # Записать opkg-репозиторий и обновить индекс
@@ -3917,12 +3938,12 @@ cleanup_dpi_detector_dupes() {
 }
 
 menu_dpi_detector() {
-  echo
-  info "dpi-detector (rust) — установка актуальной версии"
   if [ -x /opt/bin/dpi-detector ]; then
-    info "Основной бинарник на месте: /opt/bin/dpi-detector"
+    echo
+    info "Открываем: 10. dpi-detector"
+    info "Локально: /opt/bin/dpi-detector"
+    printf '%s\n' "================================================"
     cleanup_dpi_detector_dupes
-    info "Запуск /opt/bin/dpi-detector ..."
     if [ -c /dev/tty ]; then
       /opt/bin/dpi-detector </dev/tty
     else
@@ -3930,12 +3951,10 @@ menu_dpi_detector() {
     fi
     return 0
   fi
-  info "Запуск установщика..."
-  run_remote_sh "$DPI_DETECTOR_INSTALL_URL" || return 1
+  run_menu_remote_sh "10" "dpi-detector" "$DPI_DETECTOR_INSTALL_URL" || return 1
   echo
   info "Очистка дубликатов dpi-detector (/tmp, /opt/root)..."
   cleanup_dpi_detector_dupes
-  info "Установка dpi-detector завершена."
   if [ -x /opt/bin/dpi-detector ]; then
     info "Запуск /opt/bin/dpi-detector ..."
     if [ -c /dev/tty ]; then
@@ -3949,16 +3968,15 @@ menu_dpi_detector() {
 }
 
 menu_awg_manager() {
-  echo
-  info "awg-manager — установка через awg-compressed"
-  run_remote_sh "$AWG_MANAGER_INSTALL_URL" || return 1
-  info "Установщик awg-manager завершил работу."
+  run_menu_remote_sh "11" "awg-manager" "$AWG_MANAGER_INSTALL_URL" || return 1
 }
 
 menu_keenkit() {
-  echo
   if [ -f /opt/keenkit.sh ]; then
-    info "Найден /opt/keenkit.sh — запуск..."
+    echo
+    info "Открываем: 12. KeenKit"
+    info "Локально: /opt/keenkit.sh"
+    printf '%s\n' "================================================"
     if [ -c /dev/tty ]; then
       sh /opt/keenkit.sh </dev/tty
     else
@@ -3966,9 +3984,7 @@ menu_keenkit() {
     fi
     return 0
   fi
-  info "KeenKit — установка"
-  run_remote_sh "$KEENKIT_INSTALL_URL" || return 1
-  info "Установщик KeenKit завершил работу."
+  run_menu_remote_sh "12" "KeenKit" "$KEENKIT_INSTALL_URL" || return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -4632,14 +4648,11 @@ remove_tg_ws_proxy_rs() {
 USQUE_INSTALL_URL="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_usque.sh"
 
 menu_usque_keenetic() {
-  echo
-  info "usque-keenetic"
-  # min=2000: installer_usque.sh ~5 КБ (дефолт download_sh_validated = 8000)
-  if ! run_remote_sh "$USQUE_INSTALL_URL" 2000; then
+  # min=2000: installer_usque.sh ~5 КБ
+  if ! run_menu_remote_sh "13" "usque-keenetic" "$USQUE_INSTALL_URL" 2000; then
     error "Установщик usque-keenetic завершился с ошибкой."
     return 1
   fi
-  # обновить кэш opkg после установки/апгрейда пакета
   refresh_opkg_cache 2>/dev/null || true
 }
 
@@ -4718,12 +4731,7 @@ remove_telemt() {
 }
 
 menu_telemt() {
-  echo
-  info "telemt / telemt-panel"
-  info "Источник: $TELEMT_BUNDLE_URL"
-  # единое меню: telemt, panel, systemD emu, удаление
-  run_remote_sh "$TELEMT_BUNDLE_URL" 2000 || return 1
-  info "Меню telemt завершило работу."
+  run_menu_remote_sh "15" "telemt / telemt-panel" "$TELEMT_BUNDLE_URL" 2000 || return 1
 }
 
 
