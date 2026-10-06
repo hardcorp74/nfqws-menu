@@ -1884,8 +1884,31 @@ show_banner() {
     echo
     if is_telemt_installed; then
         _tm_st=""
-        { [ -x /opt/usr/bin/telemt ] || [ -x /opt/etc/init.d/S99telemt ]; } && _tm_st="${_tm_st}telemt "
-        { [ -x /opt/sbin/telemt-panel ] || [ -x /opt/etc/init.d/S99telemt-panel ]; } && _tm_st="${_tm_st}telemt-panel "
+        # telemt + версия
+        if [ -x /opt/usr/bin/telemt ] || [ -x /opt/etc/init.d/S99telemt ] || [ -d /opt/etc/telemt ]; then
+            _v=""
+            [ -f /opt/etc/telemt/.version ] && _v=$(head -n1 /opt/etc/telemt/.version 2>/dev/null | tr -d ' \r\n')
+            case "$_v" in v*|V*) _v=$(printf '%s' "$_v" | sed 's/^[vV]//') ;; esac
+            if [ -z "$_v" ] && [ -x /opt/usr/bin/telemt ]; then
+                _v=$(/opt/usr/bin/telemt --version 2>/dev/null | head -n1 | sed -n 's/.*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')
+            fi
+            if [ -n "$_v" ]; then
+                _tm_st="${_tm_st}telemt $_v "
+            else
+                _tm_st="${_tm_st}telemt "
+            fi
+        fi
+        # telemt-panel + версия
+        if [ -x /opt/sbin/telemt-panel ] || [ -x /opt/etc/init.d/S99telemt-panel ] || [ -d /opt/etc/telemt-panel ]; then
+            _v=""
+            [ -f /opt/etc/telemt-panel/.version ] && _v=$(head -n1 /opt/etc/telemt-panel/.version 2>/dev/null | tr -d ' \r\n')
+            case "$_v" in v*|V*) _v=$(printf '%s' "$_v" | sed 's/^[vV]//') ;; esac
+            if [ -n "$_v" ]; then
+                _tm_st="${_tm_st}telemt-panel $_v "
+            else
+                _tm_st="${_tm_st}telemt-panel "
+            fi
+        fi
         [ -x /opt/usr/bin/systemctl ] && _tm_st="${_tm_st}systemctl "
         info "Обнаружено: ${_tm_st:-частично}"
         echo
