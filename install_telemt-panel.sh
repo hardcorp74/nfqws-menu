@@ -416,21 +416,27 @@ HAS_BIN=0
 [ -x "$BIN_PATH" ] && HAS_BIN=1
 
 LOCAL_VER=$(get_local_version)
-if [ "$PANEL_SOURCE" = "ipk" ]; then
-    echo "Detecting latest telemt-panel from $PANEL_IPK_BASE ..."
+# Версия из меню nfqws (TELEMT_PANEL_VERSION) или latest
+if [ -n "${TELEMT_PANEL_VERSION:-}" ]; then
+    LATEST_VER="$TELEMT_PANEL_VERSION"
+    echo "Requested version: $LATEST_VER (from menu)"
 else
-    echo "Detecting latest telemt-panel from GitHub ($GITHUB_REPO)..."
-fi
-LATEST_VER=$(get_latest_version)
-if [ -z "$LATEST_VER" ]; then
-    ensure_deps 1
+    if [ "$PANEL_SOURCE" = "ipk" ]; then
+        echo "Detecting latest telemt-panel from $PANEL_IPK_BASE ..."
+    else
+        echo "Detecting latest telemt-panel from GitHub ($GITHUB_REPO)..."
+    fi
     LATEST_VER=$(get_latest_version)
+    if [ -z "$LATEST_VER" ]; then
+        ensure_deps 1
+        LATEST_VER=$(get_latest_version)
+    fi
 fi
 if [ -z "$LATEST_VER" ]; then
     echo "ERROR: Cannot detect latest telemt-panel version"
     exit 1
 fi
-echo "Latest version: $LATEST_VER"
+echo "Target version: $LATEST_VER"
 [ -n "$LOCAL_VER" ] && echo "Installed version: $LOCAL_VER" || echo "Installed version: (none)"
 
 # Сразу после определения версии — проверка места (перед любой установкой/обновлением)
