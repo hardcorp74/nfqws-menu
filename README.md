@@ -4,7 +4,7 @@
 
 Репозиторий также служит хранилищем готовых **стратегий** обхода DPI, **blobs** и **lists**.
 
-- Скрипт: [`nfqws-menu.sh`](nfqws-menu.sh) (текущая версия **0.8.0**)
+- Скрипт: [`nfqws-menu.sh`](nfqws-menu.sh) (текущая версия **0.9.37**)
 - Стратегии: [`strategies/`](strategies/)
 - Hosts: [`hosts`](hosts)
 - Контрольные суммы: [`SHA256SUMS`](SHA256SUMS), [`strategies/blobs/SHA256SUMS`](strategies/blobs/SHA256SUMS)
@@ -55,18 +55,20 @@ menu
 
 При запуске скрипт:
 
-1. Определяет архитектуру процессора (`aarch64` / `mipsel` / `mips` …) — с кэшированием.
-2. Показывает **только установленные** компоненты (версии и статус):
+1. Определяет архитектуру: **`opkg print-architecture`** (основной) → при ошибке **`/opt/etc/opkg.conf`** → fallback `uname -m`. На части Keenetic `uname`/RCI отдают `mips` вместо `mipsel` — поэтому opkg приоритетнее.
+2. Заголовок: **Модель / Title / ARCH** из RCI (`/rci/show/version`). ARCH зелёный (из opkg) или жёлтый (из conf/uname). Если в RCI нет `opkg-kmod-netfilter` — красное предупреждение установить «Модули ядра подсистемы Netfilter».
+3. Показывает **только установленные** компоненты (версии и статус) одним проходом awk по status/process-кэшу:
    - пакеты NFQWS / web, usque-keenetic, **tg-ws-proxy-rs**, magitrickle;
-   - dpi-detector, awg-manager (`[+SB]` при наличии sing-box), KeenKit, telemt;
-   - **⚡** — сервис запущен; **⭡** — доступна более новая версия (фоновая проверка, TTL ~6 ч).
-3. Предлагает меню:
+   - dpi-detector, awg-manager (⚡ при sing-box / amneziawg), KeenKit, telemt, opera-proxy, cron, dropbear;
+   - **⚡** — сервис запущен; **⭡** — доступна более новая версия (фоновая проверка, **TTL 10 мин**, перерисовка меню без Enter).
+4. Интерфейс **RU / EN** (пункт **77**): подписи меню и общие промпты (`Your choice [0]:` / `Ваш выбор [0]:`). Подпись `Language: RU|EN` всегда латиницей (удобно для Telnet).
+5. Предлагает меню:
 
 ```
 [::]  КОМПОНЕНТЫ
       1.  Установка NFQWS / NFQWS2
 
-[::]  СТРАТЕГИИ/СПИСКИ
+[::]  СТРАТЕГИИ / СПИСКИ
       2.  Выбор стратегии
       3.  Обновить IPSet List
       4.  Загрузить rkn.list (125k+ доменов)
@@ -84,15 +86,13 @@ menu
       15. telemt / telemt-panel
       16. TG WS Proxy Rust
 
-[::]  СЕРВИС (S)
-      77. Change language
+[::]  СЕРВИС [S]  |  Language: RU|EN [77]
       88. Удаление пакетов
-
       99. Обновить скрипт
       00. Выход
 ```
 
-Горячие клавиши: **S** — сервисные утилиты (UPX, Dropbear fix, upgrade пакетов); **U** — `opkg update && opkg upgrade`.
+Горячие клавиши: **S** — сервисные утилиты (UPX, Dropbear fix, upgrade пакетов); **U** — `opkg update && opkg upgrade`; **77** — смена языка RU↔EN.
 
 Пример блока статуса:
 
@@ -179,7 +179,7 @@ menu
 
 - Если `rkn.list` уже есть — показывает размер в **КБ** (без медленного подсчёта 125k строк) и спрашивает, обновлять ли список (**по умолчанию: Нет**). При отказе скачивание пропускается.
 - Скачивает большой список доменов РКН из [IndeecFOX/zapret4rocket](https://github.com/IndeecFOX/zapret4rocket)\
-  (`extra_strats/TCP/RKN/List.txt`). При недоступности GitHub — зеркало `mizulina.shit.vc` (как в zapret4rocket/z4r).
+  (`extra_strats/TCP/RKN/List.txt`). Сначала **GitHub raw**, затем jsDelivr / Fastly / ghproxy; при недоступности — зеркало `mizulina.shit.vc`.
 - Записывает:
   - **v1** → `/opt/etc/nfqws/rkn.list`
   - **v2** → `/opt/etc/nfqws2/lists/rkn.list`
@@ -288,20 +288,21 @@ curl -sL https://raw.githubusercontent.com/rndnaame/awg-compressed/main/install-
 
 Адаптация неофициального клиента Cloudflare WARP с режимом MASQUE для роутеров Keenetic / Netcraze.
 
-Установка / обновление через скрипт [`installer_usque.sh`](https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_usque.sh) (пункт меню 13 или напрямую):
+Через [`installer_usque.sh`](https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_usque.sh) (пункт меню 13 или напрямую):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_usque.sh | sh
 ```
 
-Скрипт:
+Подменю:
 
-1. Определяет архитектуру (`opkg` / `opkg.conf` / `uname`)
-2. Пишет репозиторий `https://side-effect-tm.github.io/usque-keenetic/$ARCH` в `/opt/etc/opkg/usque-keenetic.conf`
-3. Ставит или обновляет пакет `usque-keenetic` через opkg
+1. **Установка** — пакет [usque-keenetic](https://github.com/side-effect-tm/usque-keenetic) (opkg, репозиторий `side-effect-tm.github.io/usque-keenetic/all`)
+2. **Обновление bin** — бинарник [Diniboy1123/usque](https://github.com/Diniboy1123/usque) с GitHub Releases → `/opt/usr/bin/usque` (aarch64→arm64, mipsel→mipsle, mips→mips, x86_64→amd64)
+3. **Удаление** — `opkg remove --autoremove usque-keenetic` + conf репозитория; опционально `/opt/etc/usque`
 
 - Init: `/opt/etc/init.d/S51usque` (start | stop | restart | status)
 - Конфиг: `/opt/etc/usque/usque.conf`
+- Бинарник: `/opt/usr/bin/usque`
 
 ```
 # Интерфейс. Определяется автоматически при установке.
@@ -400,11 +401,21 @@ Init: `/opt/etc/init.d/S99tg-ws-proxy-rs` (start / stop / status / restart)
 
 ## Changelog
 
+### 0.9.x
+
+- **Архитектура** — `opkg print-architecture` → `/opt/etc/opkg.conf` → `uname`; заголовок `Модель Title ARCH`; предупреждение без Netfilter-kmod
+- **Язык RU/EN (77)** — локализация основного меню и общих промптов; `Language: RU|EN` всегда латиницей (Telnet)
+- **Проверка обновлений** — TTL **10 мин**; `read -t` для авто-перерисовки с меткой ⭡; dpi-detector учитывает **pre-release**
+- **Компоненты** — разбор `/opt/lib/opkg/status` (только `installed`), один awk-проход; меньше зависаний при занятом opkg
+- **rkn.list** — сначала GitHub raw; очистка list через awk (в т.ч. CRLF)
+- **Стратегии** — предупреждение о **ts-фулинге** (TCP timestamps на Windows)
+- **Промпты** — единый формат `Your choice [0]:` / `Ваш выбор [0]:`; пункт **0** везде `Back` / `Назад`
+
 ### 0.7.0 – 0.8.0
 
 - **Нумерация меню** — единый п. **1** (NFQWS / NFQWS2 / web / .ipk); стратегии/списки **2–8**; утилиты **10–16** (без TG WS Proxy Go)
 - **п. 1 → 4** — установка `.ipk` напрямую (GitHub Releases / ghproxy / github.io) при блокировке opkg-репозитория
-- **Проверка обновлений** — фоновый опрос (меню, tg-ws-proxy-rs, dpi-detector, awg-manager…); метка **⭡** в статусе и заголовке; TTL ~6 ч (`NFQWS_MENU_UPDATE_TTL`)
+- **Проверка обновлений** — фоновый опрос (меню, tg-ws-proxy-rs, dpi-detector, awg-manager…); метка **⭡** в статусе и заголовке; TTL 10 мин (`NFQWS_MENU_UPDATE_TTL`)
 - **TG WS Proxy Go** убран из меню (остаётся миграция секрета/порта при установке Rust)
 
 ### 0.6.69
@@ -593,7 +604,7 @@ nfqws-menu/
 # Статус сервисов
 /opt/etc/init.d/S51nfqws status          # v1
 /opt/etc/init.d/S51nfqws2 status         # v2
-/opt/etc/init.d/S99tg-ws-proxy status    # TG WS Proxy
+/opt/etc/init.d/S99tg-ws-proxy-rs status # TG WS Proxy Rust
 /opt/etc/init.d/S51usque status          # usque
 /opt/etc/init.d/S99magitrickle status    # MagiTrickle
 
@@ -603,7 +614,7 @@ netstat -lnt | grep ':90'
 # Перезапуск
 /opt/etc/init.d/S51nfqws restart
 /opt/etc/init.d/S51nfqws2 restart
-/opt/etc/init.d/S99tg-ws-proxy restart
+/opt/etc/init.d/S99tg-ws-proxy-rs restart
 /opt/etc/init.d/S51usque restart
 /opt/etc/init.d/S99magitrickle restart
 
@@ -611,15 +622,15 @@ netstat -lnt | grep ':90'
 opkg info nfqws-keenetic
 opkg info nfqws2-keenetic
 opkg info nfqws-keenetic-web
-opkg info tg-ws-proxy
+opkg info tg-ws-proxy-rs   # если установлен как пакет
 opkg info usque-keenetic
 opkg info magitrickle
 
 # Конфиги
 vi /opt/etc/nfqws/nfqws.conf
 vi /opt/etc/nfqws2/nfqws2.conf
-vi /opt/etc/tg-ws-proxy/config.conf
-vi /opt/etc/tg-ws-proxy/secret.conf
+vi /opt/etc/tg-ws-proxy-rs/config.conf
+vi /opt/etc/tg-ws-proxy-rs/secret.conf
 vi /opt/etc/usque/usque.conf
 
 # Интерфейс провайдера
