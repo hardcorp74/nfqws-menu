@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.34"
+SCRIPT_VERSION="0.9.35"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -1309,7 +1309,7 @@ pick_nfqws_ver() {
     echo "  1) nfqws-keenetic  (v1)"
     echo "  2) nfqws2-keenetic (v2)"
     [ "$allow_both" = "1" ] && echo "  a) Обе"
-    ask "${LBL_YOUR_CHOICE} [1/2$([ "$allow_both" = "1" ] && echo '/a')]: "
+    ask "${LBL_YOUR_CHOICE} [0]: "
     read -r c
     case "$c" in
       1) NFQWS_VER=1 ;;
@@ -4258,7 +4258,7 @@ tg_ws_proxy_rs_choose_variant() {
   # предыдущий вопрос, и тогда на экране «n», а поставлено будет что-то другое.
   tries=0
   while [ "$tries" -lt 3 ]; do
-    ask "${LBL_YOUR_CHOICE} [1/2, Enter = 1]: "
+    ask "${LBL_YOUR_CHOICE} [0]: "
     read_menu answer || break
     case "$answer" in
       1|"") TG_WS_PROXY_RS_UPX=0; break ;;
@@ -5303,7 +5303,7 @@ menu_remove() {
   echo "  [b] Удалить резервные копии (.bak.* / *-opkg)"
   echo "  [0] ${LBL_BACK_ITEM}"
   echo
-  ask "${LBL_YOUR_CHOICE} [num/a/b/0]: "
+  ask "${LBL_YOUR_CHOICE} [0]: "
   read -r choice
 
   case "$choice" in
@@ -5419,7 +5419,7 @@ service_dropbear_fix() {
   echo "  2) Со сбросом пароля (root → keenetic)"
   echo "  0) ${LBL_BACK_ITEM}"
   echo
-  ask "${LBL_YOUR_CHOICE} [1/2/0]: "
+  ask "${LBL_YOUR_CHOICE} [0]: "
   read_menu dchoice
   case "$dchoice" in
     1) reset=0 ;;
@@ -5518,7 +5518,7 @@ menu_service() {
     echo "      U. $LBL_U"
     echo "      0. ${LBL_BACK_ITEM}"
     echo
-    ask "${LBL_YOUR_CHOICE} [1/2/U/0]: "
+    ask "${LBL_YOUR_CHOICE} [0]: "
     read -r schoice
     case "$schoice" in
       1) service_upx_compress || true ;;
