@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.31"
+SCRIPT_VERSION="0.9.33"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -130,6 +130,12 @@ ui_apply_lang() {
       LBL_INSTALL_TITLE="Установка NFQWS / NFQWS2"
       LBL_IPK_TITLE="Установка / обновление .ipk (обход DPI)"
       LBL_IPK_MENU="Установка / обновление .ipk (обход DPI)"
+      LBL_IPSET_WARN1="⚠ ОСТОРОЖНО"
+      LBL_IPSET_WARN2="Вы собираетесь изменить ipset.list."
+      LBL_IPSET_WARN3="Большой список CIDR от Flowseal (33K+) может нагрузить роутер"
+      LBL_IPSET_WARN4="и поломать работу отдельных сервисов / сайтов."
+      LBL_IPSET_OPT1="Загрузить IPSet от FlowSeal (33K+ CIDR)"
+      LBL_IPSET_OPT2="Загрузить стандартный IPSet от nfqws-keenetic"
       ;;
     *)
       UI_LANG="en"
@@ -169,6 +175,12 @@ ui_apply_lang() {
       LBL_INSTALL_TITLE="Install NFQWS / NFQWS2"
       LBL_IPK_TITLE="Install / update .ipk (bypass DPI)"
       LBL_IPK_MENU="Install / update .ipk (bypass DPI)"
+      LBL_IPSET_WARN1="⚠ CAUTION"
+      LBL_IPSET_WARN2="You are about to change ipset.list."
+      LBL_IPSET_WARN3="A large Flowseal CIDR list (33K+) may load the router"
+      LBL_IPSET_WARN4="and break some services / websites."
+      LBL_IPSET_OPT1="Download IPSet from FlowSeal (33K+ CIDR)"
+      LBL_IPSET_OPT2="Download standard IPSet from nfqws-keenetic"
       ;;
   esac
 }
@@ -2533,21 +2545,21 @@ update_ipset_list() {
   tmp="/tmp/nfqws-ipset-$$.txt"
 
   echo
-  printf '%s\n' "${RED}${BOLD}⚠ ОСТОРОЖНО${NC}"
-  printf '%s\n' "${RED}Вы собираетесь изменить ipset.list.${NC}"
-  printf '%s\n' "${RED}Большой список CIDR от Flowseal (33K+) может нагрузить роутер${NC}"
-  printf '%s\n' "${RED}и поломать работу отдельных сервисов / сайтов.${NC}"
+  printf '%s\n' "${RED}${BOLD}${LBL_IPSET_WARN1}${NC}"
+  printf '%s\n' "${RED}${LBL_IPSET_WARN2}${NC}"
+  printf '%s\n' "${RED}${LBL_IPSET_WARN3}${NC}"
+  printf '%s\n' "${RED}${LBL_IPSET_WARN4}${NC}"
   echo
-  echo "  1) Загрузить IPSet от FlowSeal (33K+ CIDR)"
-  echo "  2) Загрузить стандартный IPSet от nfqws-keenetic"
-  echo "  0) Отмена"
-  ask "Выбор [0]: "
+  echo "  1) ${LBL_IPSET_OPT1}"
+  echo "  2) ${LBL_IPSET_OPT2}"
+  echo "  0) ${LBL_BACK_ITEM}"
+  ask "${LBL_CHOICE} [0]: "
   read -r choice
   case "$choice" in
     1) ;;
     2) ;;
-    0|"") info "Отменено."; return 0 ;;
-    *) warn "Неверный выбор."; return 1 ;;
+    0|"") return 0 ;;
+    *) warn "${LBL_INVALID}"; return 1 ;;
   esac
 
   pick_nfqws_ver 1 || return
