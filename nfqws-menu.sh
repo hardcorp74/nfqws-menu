@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.29"
+SCRIPT_VERSION="0.9.30"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -123,6 +123,13 @@ ui_apply_lang() {
       LBL_MODEL="Модель:"
       LBL_LANG="Language: RU"
       LBL_INVALID="Неверный пункт меню"
+      LBL_BACK_ITEM="Назад"
+      LBL_CANCEL="Отмена"
+      LBL_YOUR_CHOICE="Ваш выбор"
+      LBL_CHOICE="Выбор"
+      LBL_INSTALL_TITLE="Установка NFQWS / NFQWS2"
+      LBL_IPK_TITLE="Установка / обновление .ipk (обход DPI)"
+      LBL_IPK_MENU="Установка / обновление .ipk (обход DPI)"
       ;;
     *)
       UI_LANG="en"
@@ -155,6 +162,13 @@ ui_apply_lang() {
       LBL_MODEL="Model:"
       LBL_LANG="Language: EN"
       LBL_INVALID="Invalid menu option"
+      LBL_BACK_ITEM="Back"
+      LBL_CANCEL="Cancel"
+      LBL_YOUR_CHOICE="Your choice"
+      LBL_CHOICE="Choice"
+      LBL_INSTALL_TITLE="Install NFQWS / NFQWS2"
+      LBL_IPK_TITLE="Install / update .ipk (bypass DPI)"
+      LBL_IPK_MENU="Install / update .ipk (bypass DPI)"
       ;;
   esac
 }
@@ -1646,12 +1660,12 @@ menu_install_ipk_direct() {
   fi
 
   echo
-  printf '%s\n' "${BOLD}── Установка / обновление .ipk (обход DPI) ──${NC}"
+  printf '%s\n' "${BOLD}── ${LBL_IPK_TITLE} ──${NC}"
   printf "  %s1)%s  nfqws-keenetic       %s%s%s\n" "$GREEN" "$NC" "$CYAN" "$v1" "$NC"
   printf "  %s2)%s  nfqws2-keenetic      %s%s%s\n" "$GREEN" "$NC" "$CYAN" "$v2" "$NC"
   printf "  %s3)%s  nfqws-keenetic-web   %s%s%s\n" "$GREEN" "$NC" "$CYAN" "$vweb" "$NC"
-  printf "  %s0)%s  Отмена\n" "$DIM" "$NC"
-  ask "Выбор [0]: "
+  printf "  %s0)%s  ${LBL_CANCEL}\n" "$DIM" "$NC"
+  ask "${LBL_CHOICE} [0]: "
   read_menu choice
   case "$choice" in
     1)
@@ -1678,20 +1692,20 @@ menu_install_ipk_direct() {
       info "Адрес: http://<IP-роутера>:90"
       info "Логин/пароль — учётные данные Entware (по умолчанию root / keenetic)"
       ;;
-    0|"") info "Отменено."; return 0 ;;
-    *) warn "Неверный выбор"; return 1 ;;
+    0|"") info "${LBL_CANCEL}."; return 0 ;;
+    *) warn "${LBL_INVALID}"; return 1 ;;
   esac
 }
 
 menu_install_nfqws() {
   echo
-  printf '%s\n' "${BOLD}── Установка NFQWS / NFQWS2 ──${NC}"
+  printf '%s\n' "${BOLD}── ${LBL_INSTALL_TITLE} ──${NC}"
   printf "  %s1)%s  nfqws-keenetic\n" "$GREEN" "$NC"
   printf "  %s2)%s  nfqws2-keenetic\n" "$GREEN" "$NC"
   printf "  %s3)%s  nfqws-keenetic-web\n" "$GREEN" "$NC"
-  printf "  %s4)%s  Установка / обновление .ipk (обход DPI)\n" "$GREEN" "$NC"
-  printf "  %s0)%s  Назад\n" "$DIM" "$NC"
-  ask "Ваш выбор [0]: "
+  printf "  %s4)%s  ${LBL_IPK_MENU}\n" "$GREEN" "$NC"
+  printf "  %s0)%s  ${LBL_BACK_ITEM}\n" "$DIM" "$NC"
+  ask "${LBL_YOUR_CHOICE} [0]: "
   read_menu choice
   case "$choice" in
     1) install_nfqws1 ;;
@@ -1699,7 +1713,7 @@ menu_install_nfqws() {
     3) install_web ;;
     4) menu_install_ipk_direct ;;
     0|"") return ;;
-    *) warn "Неверный выбор" ;;
+    *) warn "${LBL_INVALID}" ;;
   esac
 }
 
