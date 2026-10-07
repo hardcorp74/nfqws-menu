@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.35"
+SCRIPT_VERSION="0.9.37"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -2387,7 +2387,7 @@ restore_conf_from_backup() {
   fi
 
   echo "   0) ${LBL_BACK_ITEM}"
-  ask "Номер файла для восстановления: "
+  ask "${LBL_YOUR_CHOICE} [0]: "
   read -r num
   [ -z "$num" ] || [ "$num" = "0" ] && return 0
 
@@ -2477,7 +2477,7 @@ menu_strategy() {
   done
   printf '  %s99) Восстановление из backup%s\n' "${YELLOW}${BOLD}" "$NC"
   echo "   0) ${LBL_BACK_ITEM}"
-  ask "Номер стратегии: "
+  ask "${LBL_YOUR_CHOICE} [0]: "
   read -r num
   [ -z "$num" ] || [ "$num" = "0" ] && return
 
@@ -3640,7 +3640,7 @@ menu_dns_manage() {
     printf '%s\n' " ${BOLD}4)${NC} ${RED}Удалить сервер(ы)${NC}"
     printf '%s\n' " ${BOLD}0)${NC} ${LBL_BACK_ITEM}"
     printf '%s\n' "${DIM}────────────────────────────────────────────────────────${NC}"
-    ask "Выберите действие [0-4]: "
+    ask "${LBL_YOUR_CHOICE} [0]: "
     read -r choice
     case $choice in
       1) add_dot_menu ;;
@@ -5140,7 +5140,7 @@ menu_change_fake_blob() {
     return 0
   fi
   echo
-  ask "Номер blob-файла для замены (Enter = отмена): "
+  ask "${LBL_YOUR_CHOICE} [0]: "
   read -r bchoice
   case "$bchoice" in
     ''|0|q|Q) info "Отменено."; rm -f "$map_file" "$list_file" "$cand_file" /tmp/nfqws-local-blobs-$$ /tmp/nfqws-repo-blobs-$$; return 0 ;;
