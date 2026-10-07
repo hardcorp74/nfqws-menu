@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.26"
+SCRIPT_VERSION="0.9.29"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -101,7 +101,7 @@ ui_apply_lang() {
       LBL_INSTALLED="Установленные компоненты:"
       LBL_NONE="— ничего не установлено —"
       LBL_COMPONENTS="КОМПОНЕНТЫ"
-      LBL_STRATEGIES="СТРАТЕГИИ/СПИСКИ"
+      LBL_STRATEGIES="СТРАТЕГИИ / СПИСКИ"
       LBL_UTILS="УТИЛИТЫ"
       LBL_REMOVE="СЕРВИС"
       LBL_S1="Сжать bin/sbin (UPX)"
@@ -120,35 +120,41 @@ ui_apply_lang() {
       LBL_00="Выход"
       LBL_PROMPT="Выберите пункт [Enter = выход]: "
       LBL_BACK="Нажмите Enter для возврата в меню..."
+      LBL_MODEL="Модель:"
+      LBL_LANG="Language: RU"
+      LBL_INVALID="Неверный пункт меню"
       ;;
     *)
       UI_LANG="en"
       UI_UTF8=0
       RUN_MARK=" *"
       UPD_MARK=" ⭡"
-      LBL_UPD_LEGEND="⭡ - a newer version is available"
-      LBL_INSTALLED="Installed:"
-      LBL_NONE="-- none --"
+      LBL_UPD_LEGEND="⭡ — newer version available"
+      LBL_INSTALLED="Installed components:"
+      LBL_NONE="(none)"
       LBL_COMPONENTS="COMPONENTS"
-      LBL_STRATEGIES="STRATEGIES/LISTS"
-      LBL_UTILS="UTILS"
+      LBL_STRATEGIES="STRATEGIES / LISTS"
+      LBL_UTILS="UTILITIES"
       LBL_REMOVE="SERVICE"
       LBL_S1="Compress bin/sbin (UPX)"
       LBL_S2="Dropbear fix"
       LBL_U="Upgrade all packages"
       LBL_1="Install NFQWS / NFQWS2"
       LBL_3="Select strategy"
-      LBL_4="Update IPSet List"
+      LBL_4="Update IPSet list"
       LBL_5="Download rkn.list (125k+ domains)"
-      LBL_6="Bypass DoT/DoH blocks"
-      LBL_7="Change active fake:blob"
-      LBL_8="Update hosts"
-      LBL_9="Manage DoT/DoH"
+      LBL_6="Bypass DoT/DoH blocking"
+      LBL_7="Switch active fake:blob"
+      LBL_8="Update hosts file"
+      LBL_9="Manage DoT/DoH DNS"
       LBL_88="Remove packages"
       LBL_99="Update this script"
       LBL_00="Exit"
-      LBL_PROMPT="Select item [Enter = exit]: "
-      LBL_BACK="Press Enter to return to menu..."
+      LBL_PROMPT="Select an option [Enter = exit]: "
+      LBL_BACK="Press Enter to return to the menu..."
+      LBL_MODEL="Model:"
+      LBL_LANG="Language: EN"
+      LBL_INVALID="Invalid menu option"
       ;;
   esac
 }
@@ -796,7 +802,7 @@ print_arch_line() {
     *) arch_col="$DIM" ;;
   esac
 
-  printf 'Модель:'
+  printf '%s' "${LBL_MODEL:-Model:}"
   if [ -n "$ROUTER_MODEL" ]; then
     printf ' %s' "$ROUTER_MODEL"
   else
@@ -5821,7 +5827,7 @@ main_menu() {
     echo "      15. telemt / telemt-panel"
     echo "      16. TG WS Proxy Rust"
     echo
-    printf '%s\n' "${CYAN}${BOLD}[::]  ${LBL_REMOVE} [${GREEN}S${CYAN}${BOLD}]  |  Lang: En/Ru [${GREEN}77${CYAN}${BOLD}]${NC}"
+    printf '%s\n' "${CYAN}${BOLD}[::]  ${LBL_REMOVE} [${GREEN}S${CYAN}${BOLD}]  |  ${LBL_LANG} [${GREEN}77${CYAN}${BOLD}]${NC}"
     echo "      88. $LBL_88"
     echo "      99. $LBL_99"
     echo "      00. $LBL_00"
@@ -5862,7 +5868,7 @@ main_menu() {
         info "$LBL_00."
         exit 0
         ;;
-      *) warn "Invalid menu item" ;;
+      *) warn "${LBL_INVALID:-Invalid menu option}" ;;
     esac
 
     # После внешних установщиков stdin часто «грязный» — чистим перед паузой

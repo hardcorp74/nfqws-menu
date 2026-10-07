@@ -786,9 +786,14 @@ if [ -z "$AUTO_IP" ]; then
 fi
 echo "Detected WAN IP ($DEF_IFACE): $AUTO_IP"
 
-echo "Detecting TLS domain (ending with netcraze.io)..."
+echo "Detecting TLS domain (ACME / netcraze.io)..."
 AUTO_DOMAIN=$(ndmc -c 'ip http ssl acme list' 2>/dev/null | grep "domain:" | awk '{print $2}' | grep "netcraze.io" | head -n 1) || true
-echo "Domain: $AUTO_DOMAIN"
+if [ -z "$AUTO_DOMAIN" ]; then
+    AUTO_DOMAIN=$(ndmc -c 'ip http ssl acme list' 2>/dev/null | grep "domain:" | awk '{print $2}' | head -n 1) || true
+fi
+# telemt требует непустой валидный домен (fake-TLS / mask)
+DEFAULT_TLS_DOMAIN="${AUTO_DOMAIN:-vk.com}"
+echo "Suggested TLS domain: $DEFAULT_TLS_DOMAIN"
 
 printf "Enter port (default 1443): "
 read PORT || true
@@ -813,9 +818,25 @@ printf "Enter public host for links (IP or domain, default $AUTO_IP): "
 read PUBLIC_HOST || true
 PUBLIC_HOST=${PUBLIC_HOST:-$AUTO_IP}
 
-printf "Enter TLS domain (default $AUTO_DOMAIN): "
-read TLS_DOMAIN || true
-TLS_DOMAIN=${TLS_DOMAIN:-$AUTO_DOMAIN}
+# TLS domain обязателен — пустая строка ломает запуск telemt
+_is_valid_domain() {
+    case "$1" in
+        ""|*[!a-zA-Z0-9.-]*|.*|*..*|*.) return 1 ;;
+        *.*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+while true; do
+    printf "Enter TLS domain (default %s): " "$DEFAULT_TLS_DOMAIN"
+    read TLS_DOMAIN || true
+    TLS_DOMAIN=${TLS_DOMAIN:-$DEFAULT_TLS_DOMAIN}
+    TLS_DOMAIN=$(printf '%s' "$TLS_DOMAIN" | tr -d ' \t\r')
+    if _is_valid_domain "$TLS_DOMAIN"; then
+        break
+    fi
+    echo "ERROR: нужен валидный домен (например vk.com, google.com). Пустое значение нельзя."
+done
+echo "TLS domain: $TLS_DOMAIN"
 
 printf "Enter username (default user1): "
 read USERNAME || true
@@ -1024,10 +1045,14 @@ while true; do
     fi
 done
 
-echo "Checking domain resolution..."
+echo "Checking domain resolution ($TLS_DOMAIN)..."
+if [ -z "$TLS_DOMAIN" ]; then
+    echo "ERROR: TLS domain пустой — установка прервана."
+    exit 1
+fi
 if ! nslookup "$TLS_DOMAIN" 2>/dev/null | grep -q 'Address'; then
-    echo "WARNING: Domain $TLS_DOMAIN does not resolve!"
-    echo "Press Enter to continue anyway or Ctrl+C to abort."
+    echo "WARNING: Domain $TLS_DOMAIN does not resolve (для fake-TLS это часто нормально)."
+    echo "Press Enter to continue or Ctrl+C to abort."
     read _ || true
 else
     echo "Domain OK."
