@@ -1264,13 +1264,18 @@ PANEL_IPK_BASE=""
 PANEL_IPK_ARCH=""
 PANEL_ARCHIVE=""
 
+PANEL_VARIANT="full"   # full | lite (только github)
+PANEL_ARCH_TAG=""      # aarch64 | x86_64 для имени архива
+
 case "$ARCH" in
     aarch64)
         PANEL_SOURCE="github"
+        PANEL_ARCH_TAG="aarch64"
         PANEL_ARCHIVE="telemt-panel-aarch64-linux-gnu.tar.gz"
         ;;
     x86_64)
         PANEL_SOURCE="github"
+        PANEL_ARCH_TAG="x86_64"
         PANEL_ARCHIVE="telemt-panel-x86_64-linux-gnu.tar.gz"
         ;;
     mipsel)
@@ -1481,8 +1486,22 @@ download_and_install_binary() {
     fi
 
     # GitHub tar.gz (aarch64 / x86_64)
-    echo "Downloading telemt-panel $_ver ($PANEL_ARCHIVE)..."
-    URL="https://github.com/$GITHUB_REPO/releases/download/${_ver}/${PANEL_ARCHIVE}"
+    # тег релиза на GitHub обычно с v (v1.0.0-rc.3)
+    _tag="$_ver"
+    case "$_tag" in
+        v*|V*) ;;
+        *) _tag="v$_tag" ;;
+    esac
+    # на случай если PANEL_ARCHIVE ещё не выставлен (env override)
+    if [ -z "${PANEL_ARCHIVE:-}" ] && [ -n "${PANEL_ARCH_TAG:-}" ]; then
+        if [ "${PANEL_VARIANT:-full}" = "lite" ]; then
+            PANEL_ARCHIVE="telemt-panel-lite-${PANEL_ARCH_TAG}-linux-gnu.tar.gz"
+        else
+            PANEL_ARCHIVE="telemt-panel-${PANEL_ARCH_TAG}-linux-gnu.tar.gz"
+        fi
+    fi
+    echo "Downloading telemt-panel $_tag ($PANEL_ARCHIVE) [${PANEL_VARIANT:-full}]..."
+    URL="https://github.com/$GITHUB_REPO/releases/download/${_tag}/${PANEL_ARCHIVE}"
     echo "  $URL"
     ARCHIVE_PATH="$TMPDIR/telemt-panel.tar.gz"
     _http_download "$URL" "$ARCHIVE_PATH" || return 1
@@ -1613,8 +1632,100 @@ list_panel_releases() {
     return 1
 }
 
-# Выбор версии → LATEST_VER. Отмена → exit 0.
+# Выбор варианта full/lite (только GitHub aarch64/x86_64)
+pick_panel_variant() {
+    PANEL_VARIANT="full"
+    echo ""
+    printf '%s\n' "${BOLD}Сборка telemt-panel:${NC}"
+    echo "  1. full — SQLite или memory, бинарник ~25–32 МБ"
+    echo "  2. lite — только memory, бинарник ~12–16 МБ (роутеры / мало места)"
+    echo ""
+    printf "Вариант [1=full]: "
+    read _vc || true
+    case "$_vc" in
+        2|lite|l|L) PANEL_VARIANT="lite" ;;
+        *) PANEL_VARIANT="full" ;;
+    esac
+    if [ "$PANEL_VARIANT" = "lite" ]; then
+        PANEL_ARCHIVE="telemt-panel-lite-${PANEL_ARCH_TAG}-linux-gnu.tar.gz"
+    else
+        PANEL_ARCHIVE="telemt-panel-${PANEL_ARCH_TAG}-linux-gnu.tar.gz"
+    fi
+    echo "Выбрана сборка: $PANEL_VARIANT → $PANEL_ARCHIVE"
+}
+
+# Выбор версии → LATEST_VER (+ LATEST_IPK_* для mips). Отмена → exit 0.
 pick_panel_version() {
+    LATEST_VER=""
+    LATEST_IPK_NAME=""
+    LATEST_IPK_URL=""
+
+    # ----- mips/mipsel: только .ipk с test.entware -----
+    if [ "$PANEL_SOURCE" = "ipk" ]; then
+        _tmp="/tmp/telemt-panel-ipks-$$"
+        html=$(_http_get "$PANEL_IPK_BASE/") || true
+        if [ -z "$html" ]; then
+            echo "WARNING: не удалось получить список ipk — пробуем latest."
+            get_latest_ipk_meta || true
+            return 0
+        fi
+        names=$(printf '%s\n' "$html" | grep -oE "telemt-panel_[0-9]+\.[0-9]+\.[0-9]+-[0-9]+_${PANEL_IPK_ARCH}\.ipk" | sort -u) || true
+        if [ -z "$names" ]; then
+            echo "WARNING: ipk не найдены в $PANEL_IPK_BASE/"
+            return 0
+        fi
+        # сортировка версий по убыванию (простая)
+        : > "$_tmp"
+        for n in $names; do
+            ver=$(printf '%s\n' "$n" | sed -n "s/^telemt-panel_\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)-.*/\1/p")
+            rev=$(printf '%s\n' "$n" | sed -n "s/^telemt-panel_[0-9.]*-\([0-9][0-9]*\)_.*/\1/p")
+            printf '%s %s %s\n' "$ver" "${rev:-0}" "$n" >> "$_tmp"
+        done
+        # bubble-ish: sort -k1,1V -k2,2nr if available
+        # убывающий список версий (без tail -r / sort -V — portable BusyBox)
+        _sorted=$(sort -t' ' -k1,1 -k2,2n "$_tmp" | awk '{a[NR]=$0} END{for(i=NR;i>=1;i--) print a[i]}')
+        printf '%s\n' "$_sorted" | head -8 > "${_tmp}.list"
+
+        echo ""
+        printf '%s\n' "${BOLD}Выберите версию telemt-panel (.ipk):${NC}"
+        _i=1
+        while IFS=' ' read -r _ver _rev _name; do
+            [ -n "$_name" ] || continue
+            if [ "$_i" -eq 1 ]; then
+                printf '  %d. %s  %s(ipk — Latest)%s\n' "$_i" "$_ver" "$GREEN" "$NC"
+            else
+                printf '  %d. %s  (ipk)\n' "$_i" "$_ver"
+            fi
+            _i=$((_i + 1))
+        done < "${_tmp}.list"
+        _max=$((_i - 1))
+        echo "  0. Отмена"
+        echo ""
+        printf "Номер версии [1]: "
+        read _choice || true
+        case "$_choice" in
+            "") _choice=1 ;;
+            0|q|Q)
+                rm -f "$_tmp" "${_tmp}.list"
+                echo "Отменено."
+                exit 0
+                ;;
+        esac
+        if ! echo "$_choice" | grep -qE '^[0-9]+$' || [ "$_choice" -lt 1 ] || [ "$_choice" -gt "$_max" ]; then
+            rm -f "$_tmp" "${_tmp}.list"
+            echo "ERROR: неверный выбор."
+            exit 1
+        fi
+        _line=$(sed -n "${_choice}p" "${_tmp}.list")
+        LATEST_VER=$(echo "$_line" | awk '{print $1}')
+        LATEST_IPK_NAME=$(echo "$_line" | awk '{print $3}')
+        LATEST_IPK_URL="$PANEL_IPK_BASE/$LATEST_IPK_NAME"
+        rm -f "$_tmp" "${_tmp}.list"
+        echo "Выбрана версия: $LATEST_VER ($LATEST_IPK_NAME)"
+        return 0
+    fi
+
+    # ----- aarch64/x86_64: GitHub releases -----
     _tmp="/tmp/telemt-panel-rels-$$"
     _list=$(list_panel_releases 2>/dev/null) || _list=""
     if [ -z "$_list" ]; then
@@ -1664,6 +1775,7 @@ pick_panel_version() {
         exit 1
     fi
     echo "Выбрана версия: $LATEST_VER"
+    pick_panel_variant
     return 0
 }
 
@@ -1671,6 +1783,9 @@ pick_panel_version() {
 if [ -n "${TELEMT_PANEL_VERSION:-}" ]; then
     LATEST_VER="$TELEMT_PANEL_VERSION"
     echo "Requested version: $LATEST_VER (TELEMT_PANEL_VERSION)"
+    if [ "$PANEL_SOURCE" = "github" ]; then
+        pick_panel_variant
+    fi
 else
     pick_panel_version
     if [ -z "$LATEST_VER" ]; then
@@ -1690,13 +1805,19 @@ if [ -z "$LATEST_VER" ]; then
     echo "ERROR: Cannot detect latest telemt-panel version"
     exit 1
 fi
+# единый вид версии без ведущей v (тег для GitHub собирается при скачивании)
+case "$LATEST_VER" in v*|V*) LATEST_VER=$(printf '%s' "$LATEST_VER" | sed 's/^[vV]//') ;; esac
 echo "Target version: $LATEST_VER"
 [ -n "$LOCAL_VER" ] && echo "Installed version: $LOCAL_VER" || echo "Installed version: (none)"
+[ "$PANEL_SOURCE" = "github" ] && echo "Build variant: ${PANEL_VARIANT:-full}"
 
-# Сразу после определения версии — проверка места (перед любой установкой/обновлением)
-# Пропускаем только если бинарник уже актуален
+# Сразу после определения версии — проверка места
 if ! [ -n "$LOCAL_VER" ] || [ "$LOCAL_VER" != "$LATEST_VER" ] || [ ! -x "$BIN_PATH" ]; then
-    check_opt_space 12000 || exit 1
+    if [ "$PANEL_SOURCE" = "github" ] && [ "${PANEL_VARIANT:-full}" = "lite" ]; then
+        check_opt_space 9000 || exit 1
+    else
+        check_opt_space 12000 || exit 1
+    fi
 fi
 
 # =====================================================================
