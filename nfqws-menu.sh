@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.30"
+SCRIPT_VERSION="0.9.31"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -2374,7 +2374,7 @@ restore_conf_from_backup() {
     return 0
   fi
 
-  echo "   0) Назад"
+  echo "   0) ${LBL_BACK_ITEM}"
   ask "Номер файла для восстановления: "
   read -r num
   [ -z "$num" ] || [ "$num" = "0" ] && return 0
@@ -2464,7 +2464,7 @@ menu_strategy() {
     i=$((i + 1))
   done
   printf '  %s99) Восстановление из backup%s\n' "${YELLOW}${BOLD}" "$NC"
-  echo "   0) Назад"
+  echo "   0) ${LBL_BACK_ITEM}"
   ask "Номер стратегии: "
   read -r num
   [ -z "$num" ] || [ "$num" = "0" ] && return
@@ -3626,7 +3626,7 @@ menu_dns_manage() {
     printf '%s\n' " ${BOLD}2)${NC} Добавить DoH сервер(ы)"
     printf '%s\n' " ${BOLD}3)${NC} ${YELLOW}Привязать домен к DNS (Пресеты)${NC}"
     printf '%s\n' " ${BOLD}4)${NC} ${RED}Удалить сервер(ы)${NC}"
-    printf '%s\n' " ${BOLD}0)${NC} Назад"
+    printf '%s\n' " ${BOLD}0)${NC} ${LBL_BACK_ITEM}"
     printf '%s\n' "${DIM}────────────────────────────────────────────────────────${NC}"
     ask "Выберите действие [0-4]: "
     read -r choice
@@ -5289,7 +5289,7 @@ menu_remove() {
   fi
   echo "  [a] Удалить все пакеты NFQWS"
   echo "  [b] Удалить резервные копии (.bak.* / *-opkg)"
-  echo "  [0] Назад"
+  echo "  [0] ${LBL_BACK_ITEM}"
   echo
   ask "Выбор (номер / a / b / 0): "
   read -r choice
@@ -5405,7 +5405,7 @@ service_dropbear_fix() {
   info "$LBL_S2"
   echo "  1) Без сброса пароля"
   echo "  2) Со сбросом пароля (root → keenetic)"
-  echo "  0) Назад"
+  echo "  0) ${LBL_BACK_ITEM}"
   echo
   ask "Выбор [1/2/0]: "
   read_menu dchoice
@@ -5504,7 +5504,7 @@ menu_service() {
     echo "      1. $LBL_S1"
     echo "      2. $LBL_S2"
     echo "      U. $LBL_U"
-    echo "      0. Назад / Back"
+    echo "      0. ${LBL_BACK_ITEM}"
     echo
     ask "Выбор [1/2/U/0]: "
     read -r schoice
