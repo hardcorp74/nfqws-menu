@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.38"
+SCRIPT_VERSION="0.9.39"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -2893,7 +2893,7 @@ update_rkn_list() {
 DOT_DOH_STRATEGY_NFQWS2='#DNS
 --filter-tcp=443,853
 --filter-l7=http,tls
---hostlist-domains=dns.iij.jp,dot.sb,dns.sb,doh.sb,dns.google,dot.pub,doh.pub,controld.com,opendns.com,anycast.censurfridns.dk,dns.alidns.com,libredns.gr,cloudflare-dns.com,one.one.one.one,opennameserver.org,cleanbrowsing.org,dns.adguard-dns.com,dns.comss.one,xbox-dns.ru,dns.malw.link,geohide.ru,dns.nextdns.io,dns10.quad9.net
+--hostlist-domains=dns.iij.jp,dot.sb,dns.sb,doh.sb,dns.google,dot.pub,doh.pub,controld.com,opendns.com,anycast.censurfridns.dk,dns.alidns.com,libredns.gr,cloudflare-dns.com,one.one.one.one,opennameserver.org,cleanbrowsing.org,dns.adguard-dns.com,dns.comss.one,xbox-dns.ru,dns.malw.link,geohide.ru,dns.nextdns.io,dns10.quad9.net,dns.astracat.network,dns.bezmezhau.com,dns.dns-ai.ru,dns.mafioznik.xyz,free.shecan.ir
 --out-range=-d10
 --payload=tls_client_hello,http_req
 --lua-desync=multisplit:pos=1,host+2,midsld+2,endsld-2:seqovl=4:tcp_ts_up
@@ -2915,7 +2915,7 @@ DOT_DOH_STRATEGY_NFQWS2='#DNS
 
 # Fallback для nfqws1 (классический dpi-desync)
 DOT_DOH_STRATEGY_NFQWS1='#DNS
---filter-tcp=443,853 --filter-l7=http,tls --hostlist-domains=dns.iij.jp,dot.sb,dns.sb,doh.sb,dns.google,dot.pub,doh.pub,controld.com,opendns.com,anycast.censurfridns.dk,dns.alidns.com,libredns.gr,cloudflare-dns.com,one.one.one.one,opennameserver.org,cleanbrowsing.org,dns.adguard-dns.com,dns.comss.one,xbox-dns.ru,dns.malw.link,geohide.ru,dns.nextdns.io,dns10.quad9.net --dpi-desync=multisplit,fake --dpi-desync-split-pos=1,host+2,midsld+2,endsld-2 --dpi-desync-split-seqovl=4 --dpi-desync-fooling=md5sig --dpi-desync-fake-tls=/opt/etc/nfqws/tls_clienthello.bin --dpi-desync-fake-tls-mod=rnd,dupsid,sni=ozon.ru --dpi-desync-repeats=3
+--filter-tcp=443,853 --filter-l7=http,tls --hostlist-domains=dns.iij.jp,dot.sb,dns.sb,doh.sb,dns.google,dot.pub,doh.pub,controld.com,opendns.com,anycast.censurfridns.dk,dns.alidns.com,libredns.gr,cloudflare-dns.com,one.one.one.one,opennameserver.org,cleanbrowsing.org,dns.adguard-dns.com,dns.comss.one,xbox-dns.ru,dns.malw.link,geohide.ru,dns.nextdns.io,dns10.quad9.net,dns.astracat.network,dns.bezmezhau.com,dns.dns-ai.ru,dns.mafioznik.xyz,free.shecan.ir --dpi-desync=multisplit,fake --dpi-desync-split-pos=1,host+2,midsld+2,endsld-2 --dpi-desync-split-seqovl=4 --dpi-desync-fooling=md5sig --dpi-desync-fake-tls=/opt/etc/nfqws/tls_clienthello.bin --dpi-desync-fake-tls-mod=rnd,dupsid,sni=ozon.ru --dpi-desync-repeats=3
 --new
 --filter-tcp=443,853 --filter-l7=http,tls --ipset-ip=104.16.248.249,104.16.249.249,91.239.100.100,89.233.43.71,8.8.8.8,8.8.4.4,1.12.12.12,120.53.53.120,208.67.222.222,208.67.220.220,223.5.5.5,223.6.6.6,116.202.176.26,1.1.1.1,1.0.0.1,1.1.1.2,1.0.0.2,1.1.1.3,1.0.0.3,217.160.70.42,213.202.211.221,81.169.136.222,185.181.61.24,185.228.168.9,185.228.169.9,94.140.14.14,94.140.15.15,94.140.14.140,94.140.14.141,94.140.14.15,94.140.15.16,45.90.28.94,45.90.30.94,76.76.2.11,76.76.10.11,9.9.9.9,9.9.9.10,149.112.112.112,185.222.222.222,45.11.45.11,172.104.93.80 --dpi-desync=multisplit,fake --dpi-desync-split-pos=1,27 --dpi-desync-split-seqovl=4 --dpi-desync-fooling=md5sig --dpi-desync-fake-tls=/opt/etc/nfqws/tls_clienthello.bin --dpi-desync-fake-tls-mod=rnd,dupsid,sni=ozon.ru --dpi-desync-repeats=3
 --new
@@ -3334,6 +3334,11 @@ dot_servers_data() {
 35|NullsProxy|dns.nullsproxy.com|dns.nullsproxy.com|
 36|Cloudflare Gateway|5u35p8m9i7.cloudflare-gateway.com|5u35p8m9i7.cloudflare-gateway.com|
 37|Geo Hide|geohide.ru|geohide.ru|
+38|AstraCat|dns.astracat.network|dns.astracat.network|
+39|Bezmezhau|dns.bezmezhau.com|dns.bezmezhau.com|
+40|DNS-AI|dns.dns-ai.ru|dns.dns-ai.ru|
+41|Mafioznik|dns.mafioznik.xyz|dns.mafioznik.xyz|
+42|Shecan Free|free.shecan.ir|free.shecan.ir|
 EOF
 }
 
@@ -3367,6 +3372,11 @@ doh_servers_data() {
 25|NullsProxy|https://dns.nullsproxy.com/dns-query
 26|Cloudflare Gateway|https://5u35p8m9i7.cloudflare-gateway.com/dns-query
 27|Geo Hide|https://dns.geohide.ru/dns-query
+28|AstraCat|https://dns.astracat.network/dns-query
+29|Bezmezhau|https://dns.bezmezhau.com/dns-query
+30|DNS-AI|https://dns.dns-ai.ru/dns-query
+31|Mafioznik|https://dns.mafioznik.xyz/dns-query
+32|Shecan Free|https://free.shecan.ir/dns-query
 EOF
 }
 
@@ -3415,8 +3425,13 @@ add_dot_menu() {
   echo "35) NullsProxy (dns.nullsproxy.com)"
   echo "36) Cloudflare Gateway (5u35p8m9i7.cloudflare-gateway.com)"
   echo "37) Geo Hide (geohide.ru)"
+  echo "38) AstraCat (dns.astracat.network)"
+  echo "39) Bezmezhau (dns.bezmezhau.com)"
+  echo "40) DNS-AI (dns.dns-ai.ru)"
+  echo "41) Mafioznik (dns.mafioznik.xyz)"
+  echo "42) Shecan Free (free.shecan.ir)"
   printf '%s\n' " ${YELLOW}--- Свой вариант ---${NC}"
-  echo "38) Ввести вручную (IP / Port / SNI)"
+  echo "43) Ввести вручную (IP / Port / SNI)"
   echo " 0) Отмена"
   printf '%s\n' "${DIM}────────────────────────────────────────────────────────${NC}"
   ask "Выберите варианты: "
@@ -3428,7 +3443,7 @@ add_dot_menu() {
 
   local added_any=0 choice num label ip sni port
   for choice in $(echo "$raw_choices" | tr ',' ' '); do
-    if [ "$choice" = "38" ]; then
+    if [ "$choice" = "43" ]; then
       ask "Введите IP/Хост: "; read -r manual_ip
       ask "Введите Порт (по умолчанию 853, отмена - Enter): "; read -r manual_port
       ask "Введите SNI (отмена - Enter): "; read -r manual_sni
@@ -3486,8 +3501,13 @@ add_doh_menu() {
   echo "25) NullsProxy (https://dns.nullsproxy.com/dns-query)"
   echo "26) Cloudflare Gateway (https://5u35p8m9i7.cloudflare-gateway.com/dns-query)"
   echo "27) Geo Hide (https://dns.geohide.ru/dns-query)"
+  echo "28) AstraCat (https://dns.astracat.network/dns-query)"
+  echo "29) Bezmezhau (https://dns.bezmezhau.com/dns-query)"
+  echo "30) DNS-AI (https://dns.dns-ai.ru/dns-query)"
+  echo "31) Mafioznik (https://dns.mafioznik.xyz/dns-query)"
+  echo "32) Shecan Free (https://free.shecan.ir/dns-query)"
   printf '%s\n' " ${YELLOW}--- Свой вариант ---${NC}"
-  echo "28) Ввести вручную (произвольный URI)"
+  echo "33) Ввести вручную (произвольный URI)"
   echo " 0) Отмена"
   printf '%s\n' "${DIM}────────────────────────────────────────────────────────${NC}"
   ask "Выберите варианты: "
@@ -3499,7 +3519,7 @@ add_doh_menu() {
 
   local added_any=0 choice line uri
   for choice in $(echo "$raw_choices" | tr ',' ' '); do
-    if [ "$choice" = "28" ]; then
+    if [ "$choice" = "33" ]; then
       ask "Введите URI DoH сервера: "; read -r manual_uri
       if [ -n "$manual_uri" ]; then
         apply_doh "$manual_uri" "$domain"
