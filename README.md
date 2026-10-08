@@ -4,7 +4,7 @@
 
 Репозиторий также служит хранилищем готовых **стратегий** обхода DPI, **blobs** и **lists**.
 
-- Скрипт: [`nfqws-menu.sh`](nfqws-menu.sh) (текущая версия **0.9.38**)
+- Скрипт: [`nfqws-menu.sh`](nfqws-menu.sh) (текущая версия **0.9.40**)
 - Стратегии: [`strategies/`](strategies/)
 - Hosts: [`hosts`](hosts)
 - Контрольные суммы: [`SHA256SUMS`](SHA256SUMS), [`strategies/blobs/SHA256SUMS`](strategies/blobs/SHA256SUMS)
@@ -236,7 +236,7 @@ menu
 
 - Просмотр текущих DoT/DoH и персональных привязок к доменам
 - Счётчик слотов **N/8** — только секция **System** (Policy0/1 и `*-filters` не учитываются)
-- Пресеты DoT/DoH: Яндекс, Cloudflare, Google, Quad9, CleanBrowsing, OpenDNS, DNS.SB, dns0.eu, OpenNameServer, AdGuard (Default/Family), ControlD Free, DNS4EU, Alibaba DNS, DNSPod, **NullsProxy**, Proxy-DNS, Cloudflare Gateway и др. (Tiar Japan убраны) или ручной ввод
+- Пресеты DoT/DoH: Яндекс, Cloudflare, Google, Quad9, CleanBrowsing, OpenDNS, DNS.SB, OpenNameServer, AdGuard (Default/Family), ControlD Free, DNS4EU, Alibaba DNS, DNSPod, **NullsProxy**, Xbox-DNS, Comss, Malw Link, Geo Hide, Cloudflare Gateway, **AstraCat**, **Bezmezhau**, **DNS-AI**, **Mafioznik**, **Shecan Free** и др. или ручной ввод
 - Быстрая привязка доменов (пресеты):
 
 | № | Описание |

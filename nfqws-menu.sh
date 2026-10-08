@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.39"
+SCRIPT_VERSION="0.9.40"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -3318,27 +3318,26 @@ dot_servers_data() {
 19|ControlD Free|p0.freedns.controld.com|p0.freedns.controld.com|
 20|DNS.SB Primary|185.222.222.222|dot.sb|
 21|DNS.SB Secondary|45.11.45.11|dot.sb|
-22|dns0.eu|dns0.eu|dns0.eu|
-23|DNS4EU Protective|protective.joindns4.eu|protective.joindns4.eu|
-24|DNS4EU Unfiltered|unfiltered.joindns4.eu|unfiltered.joindns4.eu|
-25|OpenNameServer ns1|217.160.70.42|ns1.opennameserver.org|
-26|OpenNameServer ns2|213.202.211.221|ns2.opennameserver.org|
-27|OpenNameServer ns3|81.169.136.222|ns3.opennameserver.org|
-28|OpenNameServer ns4|185.181.61.24|ns4.opennameserver.org|
-29|IIJ Japan|public.dns.iij.jp|public.dns.iij.jp|
-30|Alibaba DNS|dns.alidns.com|dns.alidns.com|
-31|DNSPod|dot.pub|dot.pub|
-32|Xbox-DNS|xbox-dns.ru|xbox-dns.ru|
-33|Comss DNS|dns.comss.one|dns.comss.one|
-34|Malw Link|dns.malw.link|dns.malw.link|
-35|NullsProxy|dns.nullsproxy.com|dns.nullsproxy.com|
-36|Cloudflare Gateway|5u35p8m9i7.cloudflare-gateway.com|5u35p8m9i7.cloudflare-gateway.com|
-37|Geo Hide|geohide.ru|geohide.ru|
-38|AstraCat|dns.astracat.network|dns.astracat.network|
-39|Bezmezhau|dns.bezmezhau.com|dns.bezmezhau.com|
-40|DNS-AI|dns.dns-ai.ru|dns.dns-ai.ru|
-41|Mafioznik|dns.mafioznik.xyz|dns.mafioznik.xyz|
-42|Shecan Free|free.shecan.ir|free.shecan.ir|
+22|DNS4EU Protective|protective.joindns4.eu|protective.joindns4.eu|
+23|DNS4EU Unfiltered|unfiltered.joindns4.eu|unfiltered.joindns4.eu|
+24|OpenNameServer ns1|217.160.70.42|ns1.opennameserver.org|
+25|OpenNameServer ns2|213.202.211.221|ns2.opennameserver.org|
+26|OpenNameServer ns3|81.169.136.222|ns3.opennameserver.org|
+27|OpenNameServer ns4|185.181.61.24|ns4.opennameserver.org|
+28|IIJ Japan|public.dns.iij.jp|public.dns.iij.jp|
+29|Alibaba DNS|dns.alidns.com|dns.alidns.com|
+30|DNSPod|dot.pub|dot.pub|
+31|Xbox-DNS|xbox-dns.ru|xbox-dns.ru|
+32|Comss DNS|dns.comss.one|dns.comss.one|
+33|Malw Link|dns.malw.link|dns.malw.link|
+34|NullsProxy|dns.nullsproxy.com|dns.nullsproxy.com|
+35|Cloudflare Gateway|5u35p8m9i7.cloudflare-gateway.com|5u35p8m9i7.cloudflare-gateway.com|
+36|Geo Hide|geohide.ru|geohide.ru|
+37|AstraCat|dns.astracat.network|dns.astracat.network|
+38|Bezmezhau|dns.bezmezhau.com|dns.bezmezhau.com|
+39|DNS-AI|dns.dns-ai.ru|dns.dns-ai.ru|
+40|Mafioznik|dns.mafioznik.xyz|dns.mafioznik.xyz|
+41|Shecan Free|free.shecan.ir|free.shecan.ir|
 EOF
 }
 
@@ -3356,27 +3355,26 @@ doh_servers_data() {
 9|AdGuard Family|https://family.adguard-dns.com/dns-query
 10|ControlD Free|https://freedns.controld.com/p0
 11|DNS.SB|https://doh.dns.sb/dns-query
-12|dns0.eu|https://dns0.eu/
-13|DNS4EU Protective|https://protective.joindns4.eu/dns-query
-14|DNS4EU Unfiltered|https://unfiltered.joindns4.eu/dns-query
-15|OpenNameServer ns1|https://ns1.opennameserver.org/dns-query
-16|OpenNameServer ns2|https://ns2.opennameserver.org/dns-query
-17|OpenNameServer ns3|https://ns3.opennameserver.org/dns-query
-18|OpenNameServer ns4|https://ns4.opennameserver.org/dns-query
-19|IIJ Japan|https://public.dns.iij.jp/dns-query
-20|Alibaba DNS|https://dns.alidns.com/dns-query
-21|DNSPod|https://doh.pub/dns-query
-22|Xbox-DNS|https://xbox-dns.ru/dns-query
-23|Comss DNS|https://dns.comss.one/dns-query
-24|Malw Link|https://dns.malw.link/dns-query
-25|NullsProxy|https://dns.nullsproxy.com/dns-query
-26|Cloudflare Gateway|https://5u35p8m9i7.cloudflare-gateway.com/dns-query
-27|Geo Hide|https://dns.geohide.ru/dns-query
-28|AstraCat|https://dns.astracat.network/dns-query
-29|Bezmezhau|https://dns.bezmezhau.com/dns-query
-30|DNS-AI|https://dns.dns-ai.ru/dns-query
-31|Mafioznik|https://dns.mafioznik.xyz/dns-query
-32|Shecan Free|https://free.shecan.ir/dns-query
+12|DNS4EU Protective|https://protective.joindns4.eu/dns-query
+13|DNS4EU Unfiltered|https://unfiltered.joindns4.eu/dns-query
+14|OpenNameServer ns1|https://ns1.opennameserver.org/dns-query
+15|OpenNameServer ns2|https://ns2.opennameserver.org/dns-query
+16|OpenNameServer ns3|https://ns3.opennameserver.org/dns-query
+17|OpenNameServer ns4|https://ns4.opennameserver.org/dns-query
+18|IIJ Japan|https://public.dns.iij.jp/dns-query
+19|Alibaba DNS|https://dns.alidns.com/dns-query
+20|DNSPod|https://doh.pub/dns-query
+21|Xbox-DNS|https://xbox-dns.ru/dns-query
+22|Comss DNS|https://dns.comss.one/dns-query
+23|Malw Link|https://dns.malw.link/dns-query
+24|NullsProxy|https://dns.nullsproxy.com/dns-query
+25|Cloudflare Gateway|https://5u35p8m9i7.cloudflare-gateway.com/dns-query
+26|Geo Hide|https://dns.geohide.ru/dns-query
+27|AstraCat|https://dns.astracat.network/dns-query
+28|Bezmezhau|https://dns.bezmezhau.com/dns-query
+29|DNS-AI|https://dns.dns-ai.ru/dns-query
+30|Mafioznik|https://dns.mafioznik.xyz/dns-query
+31|Shecan Free|https://free.shecan.ir/dns-query
 EOF
 }
 
@@ -3406,32 +3404,31 @@ add_dot_menu() {
   echo "19) ControlD Free (p0.freedns.controld.com)"
   echo "20) DNS.SB Primary (185.222.222.222)"
   echo "21) DNS.SB Secondary (45.11.45.11)"
-  echo "22) dns0.eu (dns0.eu)"
-  echo "23) DNS4EU Protective (protective.joindns4.eu)"
-  echo "24) DNS4EU Unfiltered (unfiltered.joindns4.eu)"
+  echo "22) DNS4EU Protective (protective.joindns4.eu)"
+  echo "23) DNS4EU Unfiltered (unfiltered.joindns4.eu)"
   printf '%s\n' " ${YELLOW}--- OpenNameServer ---${NC}"
-  echo "25) OpenNameServer ns1 (217.160.70.42)"
-  echo "26) OpenNameServer ns2 (213.202.211.221)"
-  echo "27) OpenNameServer ns3 (81.169.136.222)"
-  echo "28) OpenNameServer ns4 (185.181.61.24)"
+  echo "24) OpenNameServer ns1 (217.160.70.42)"
+  echo "25) OpenNameServer ns2 (213.202.211.221)"
+  echo "26) OpenNameServer ns3 (81.169.136.222)"
+  echo "27) OpenNameServer ns4 (185.181.61.24)"
   printf '%s\n' " ${YELLOW}--- Япония & Китай ---${NC}"
-  echo "29) IIJ Japan (public.dns.iij.jp)"
-  echo "30) Alibaba DNS (dns.alidns.com)"
-  echo "31) DNSPod (dot.pub)"
+  echo "28) IIJ Japan (public.dns.iij.jp)"
+  echo "29) Alibaba DNS (dns.alidns.com)"
+  echo "30) DNSPod (dot.pub)"
   printf '%s\n' " ${GREEN}--- Proxy-DNS (Обход блокировок) ---${NC}"
-  echo "32) Xbox-DNS (xbox-dns.ru)"
-  echo "33) Comss DNS (dns.comss.one)"
-  echo "34) Malw Link (dns.malw.link)"
-  echo "35) NullsProxy (dns.nullsproxy.com)"
-  echo "36) Cloudflare Gateway (5u35p8m9i7.cloudflare-gateway.com)"
-  echo "37) Geo Hide (geohide.ru)"
-  echo "38) AstraCat (dns.astracat.network)"
-  echo "39) Bezmezhau (dns.bezmezhau.com)"
-  echo "40) DNS-AI (dns.dns-ai.ru)"
-  echo "41) Mafioznik (dns.mafioznik.xyz)"
-  echo "42) Shecan Free (free.shecan.ir)"
+  echo "31) Xbox-DNS (xbox-dns.ru)"
+  echo "32) Comss DNS (dns.comss.one)"
+  echo "33) Malw Link (dns.malw.link)"
+  echo "34) NullsProxy (dns.nullsproxy.com)"
+  echo "35) Cloudflare Gateway (5u35p8m9i7.cloudflare-gateway.com)"
+  echo "36) Geo Hide (geohide.ru)"
+  echo "37) AstraCat (dns.astracat.network)"
+  echo "38) Bezmezhau (dns.bezmezhau.com)"
+  echo "39) DNS-AI (dns.dns-ai.ru)"
+  echo "40) Mafioznik (dns.mafioznik.xyz)"
+  echo "41) Shecan Free (free.shecan.ir)"
   printf '%s\n' " ${YELLOW}--- Свой вариант ---${NC}"
-  echo "43) Ввести вручную (IP / Port / SNI)"
+  echo "42) Ввести вручную (IP / Port / SNI)"
   echo " 0) Отмена"
   printf '%s\n' "${DIM}────────────────────────────────────────────────────────${NC}"
   ask "Выберите варианты: "
@@ -3443,7 +3440,7 @@ add_dot_menu() {
 
   local added_any=0 choice num label ip sni port
   for choice in $(echo "$raw_choices" | tr ',' ' '); do
-    if [ "$choice" = "43" ]; then
+    if [ "$choice" = "42" ]; then
       ask "Введите IP/Хост: "; read -r manual_ip
       ask "Введите Порт (по умолчанию 853, отмена - Enter): "; read -r manual_port
       ask "Введите SNI (отмена - Enter): "; read -r manual_sni
@@ -3482,32 +3479,31 @@ add_doh_menu() {
   echo " 9) AdGuard Family (https://family.adguard-dns.com/dns-query)"
   echo "10) ControlD Free (https://freedns.controld.com/p0)"
   echo "11) DNS.SB (https://doh.dns.sb/dns-query)"
-  echo "12) dns0.eu (https://dns0.eu/)"
-  echo "13) DNS4EU Protective (https://protective.joindns4.eu/dns-query)"
-  echo "14) DNS4EU Unfiltered (https://unfiltered.joindns4.eu/dns-query)"
+  echo "12) DNS4EU Protective (https://protective.joindns4.eu/dns-query)"
+  echo "13) DNS4EU Unfiltered (https://unfiltered.joindns4.eu/dns-query)"
   printf '%s\n' " ${YELLOW}--- OpenNameServer ---${NC}"
-  echo "15) OpenNameServer ns1 (https://ns1.opennameserver.org/dns-query)"
-  echo "16) OpenNameServer ns2 (https://ns2.opennameserver.org/dns-query)"
-  echo "17) OpenNameServer ns3 (https://ns3.opennameserver.org/dns-query)"
-  echo "18) OpenNameServer ns4 (https://ns4.opennameserver.org/dns-query)"
+  echo "14) OpenNameServer ns1 (https://ns1.opennameserver.org/dns-query)"
+  echo "15) OpenNameServer ns2 (https://ns2.opennameserver.org/dns-query)"
+  echo "16) OpenNameServer ns3 (https://ns3.opennameserver.org/dns-query)"
+  echo "17) OpenNameServer ns4 (https://ns4.opennameserver.org/dns-query)"
   printf '%s\n' " ${YELLOW}--- Япония & Китай ---${NC}"
-  echo "19) IIJ Japan (https://public.dns.iij.jp/dns-query)"
-  echo "20) Alibaba DNS (https://dns.alidns.com/dns-query)"
-  echo "21) DNSPod (https://doh.pub/dns-query)"
+  echo "18) IIJ Japan (https://public.dns.iij.jp/dns-query)"
+  echo "19) Alibaba DNS (https://dns.alidns.com/dns-query)"
+  echo "20) DNSPod (https://doh.pub/dns-query)"
   printf '%s\n' " ${GREEN}--- Proxy-DNS (Обход блокировок) ---${NC}"
-  echo "22) Xbox-DNS (https://xbox-dns.ru/dns-query)"
-  echo "23) Comss DNS Keenetic/MikroTik (https://dns.comss.one/dns-query)"
-  echo "24) Malw Link (https://dns.malw.link/dns-query)"
-  echo "25) NullsProxy (https://dns.nullsproxy.com/dns-query)"
-  echo "26) Cloudflare Gateway (https://5u35p8m9i7.cloudflare-gateway.com/dns-query)"
-  echo "27) Geo Hide (https://dns.geohide.ru/dns-query)"
-  echo "28) AstraCat (https://dns.astracat.network/dns-query)"
-  echo "29) Bezmezhau (https://dns.bezmezhau.com/dns-query)"
-  echo "30) DNS-AI (https://dns.dns-ai.ru/dns-query)"
-  echo "31) Mafioznik (https://dns.mafioznik.xyz/dns-query)"
-  echo "32) Shecan Free (https://free.shecan.ir/dns-query)"
+  echo "21) Xbox-DNS (https://xbox-dns.ru/dns-query)"
+  echo "22) Comss DNS Keenetic/MikroTik (https://dns.comss.one/dns-query)"
+  echo "23) Malw Link (https://dns.malw.link/dns-query)"
+  echo "24) NullsProxy (https://dns.nullsproxy.com/dns-query)"
+  echo "25) Cloudflare Gateway (https://5u35p8m9i7.cloudflare-gateway.com/dns-query)"
+  echo "26) Geo Hide (https://dns.geohide.ru/dns-query)"
+  echo "27) AstraCat (https://dns.astracat.network/dns-query)"
+  echo "28) Bezmezhau (https://dns.bezmezhau.com/dns-query)"
+  echo "29) DNS-AI (https://dns.dns-ai.ru/dns-query)"
+  echo "30) Mafioznik (https://dns.mafioznik.xyz/dns-query)"
+  echo "31) Shecan Free (https://free.shecan.ir/dns-query)"
   printf '%s\n' " ${YELLOW}--- Свой вариант ---${NC}"
-  echo "33) Ввести вручную (произвольный URI)"
+  echo "32) Ввести вручную (произвольный URI)"
   echo " 0) Отмена"
   printf '%s\n' "${DIM}────────────────────────────────────────────────────────${NC}"
   ask "Выберите варианты: "
@@ -3519,7 +3515,7 @@ add_doh_menu() {
 
   local added_any=0 choice line uri
   for choice in $(echo "$raw_choices" | tr ',' ' '); do
-    if [ "$choice" = "33" ]; then
+    if [ "$choice" = "32" ]; then
       ask "Введите URI DoH сервера: "; read -r manual_uri
       if [ -n "$manual_uri" ]; then
         apply_doh "$manual_uri" "$domain"
