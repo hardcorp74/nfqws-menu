@@ -4,7 +4,7 @@
 
 Репозиторий также служит хранилищем готовых **стратегий** обхода DPI, **blobs** и **lists**.
 
-- Скрипт: [`nfqws-menu.sh`](nfqws-menu.sh) (текущая версия **0.9.37**)
+- Скрипт: [`nfqws-menu.sh`](nfqws-menu.sh) (текущая версия **0.9.38**)
 - Стратегии: [`strategies/`](strategies/)
 - Hosts: [`hosts`](hosts)
 - Контрольные суммы: [`SHA256SUMS`](SHA256SUMS), [`strategies/blobs/SHA256SUMS`](strategies/blobs/SHA256SUMS)
@@ -188,9 +188,14 @@ menu
 
 ### 5. Обход блокировки DoT/DoH
 
-Только при установленном **nfqws2-keenetic**.
+Доступно при установленном **nfqws-keenetic** и/или **nfqws2-keenetic** (при обеих версиях — выбор v1 / v2 / обе).
 
-Добавляет в `NFQWS_ARGS_CUSTOM` стратегию обхода блокировок публичных DoT/DoH DNS (Cloudflare, Google, AdGuard, NextDNS, Quad9 и др.), при необходимости добавляет порт `853` в `TCP_PORTS` / `UDP_PORTS`, перезапускает `S51nfqws2`.
+Добавляет в `NFQWS_ARGS_CUSTOM` стратегию обхода блокировок публичных DoT/DoH DNS:
+
+- **nfqws1** — [`strategies/dns_filter_nfqws1`](strategies/dns_filter_nfqws1) (классический `--dpi-desync`)
+- **nfqws2** — [`strategies/dns_filter_nfqws2`](strategies/dns_filter_nfqws2) (lua-desync)
+
+Покрывает Cloudflare, Google, AdGuard, NextDNS, Quad9, DNS.SB, Alibaba, Xbox-DNS, Geohide и др.; при необходимости добавляет порт `853` в `TCP_PORTS` / `UDP_PORTS` и перезапускает соответствующий сервис (`S51nfqws` / `S51nfqws2`). Стратегия сначала скачивается с GitHub, при недоступности сети — встроенный fallback.
 
 ### 6. Смена активных fake:blob
 

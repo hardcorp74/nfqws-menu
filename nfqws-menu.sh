@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.9.37"
+SCRIPT_VERSION="0.9.38"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -2886,19 +2886,40 @@ update_rkn_list() {
 
 # ---------------------------------------------------------------------------
 # 6. DoT/DoH bypass strategy в NFQWS_ARGS_CUSTOM
+# Стратегии: strategies/dns_filter_nfqws1 | strategies/dns_filter_nfqws2
 # ---------------------------------------------------------------------------
-DOT_DOH_STRATEGY='               #DNS
-                    --filter-tcp=443,853 --filter-l7=http,tls
-                    --hostlist-domains=dot.pub,doh.pub,controld.com,opendns.com,anycast.censurfridns.dk,dns.alidns.com,libredns.gr,cloudflare-dns.com,one.one.one.one,opennameserver.org,cleanbrowsing.org,dns.adguard-dns.com,dns.comss.one,dns.nextdns.io,freedns.controld.com,dns10.quad9.net,dns.google
-                    --out-range=-d10
-                    --payload=tls_client_hello,http_req
-                    --lua-desync=multisplit:pos=sniext+4,midsld-1:seqovl=4
-                    --lua-desync=fake:blob=tls_google:tcp_seq=-10000:tcp_md5:tls_mod=rnd,dupsid,sni=ozon.ru:repeats=3
-                    --new
-                    --filter-udp=853 --filter-l7=quic
-                    --hostlist-domains=dns.adguard-dns.com,dns.nextdns.io
-                    --payload=quic_initial
-                    --lua-desync=send:ipfrag:ipfrag_pos_udp=128'
+
+# Fallback, если скачивание с GitHub недоступно (формат nfqws2 / lua)
+DOT_DOH_STRATEGY_NFQWS2='#DNS
+--filter-tcp=443,853
+--filter-l7=http,tls
+--hostlist-domains=dns.iij.jp,dot.sb,dns.sb,doh.sb,dns.google,dot.pub,doh.pub,controld.com,opendns.com,anycast.censurfridns.dk,dns.alidns.com,libredns.gr,cloudflare-dns.com,one.one.one.one,opennameserver.org,cleanbrowsing.org,dns.adguard-dns.com,dns.comss.one,xbox-dns.ru,dns.malw.link,geohide.ru,dns.nextdns.io,dns10.quad9.net
+--out-range=-d10
+--payload=tls_client_hello,http_req
+--lua-desync=multisplit:pos=1,host+2,midsld+2,endsld-2:seqovl=4:tcp_ts_up
+--lua-desync=fake:blob=tls_clienthello:tcp_md5:tcp_seq=10000:tls_mod=rnd,dupsid,sni=ozon.ru:repeats=3
+--new
+--filter-tcp=443,853
+--filter-l7=http,tls
+--ipset-ip=104.16.248.249,104.16.249.249,91.239.100.100,89.233.43.71,8.8.8.8,8.8.4.4,1.12.12.12,120.53.53.53,208.67.222.222,208.67.220.220,223.5.5.5,223.6.6.6,116.202.176.26,1.1.1.1,1.0.0.1,1.1.1.2,1.0.0.2,1.1.1.3,1.0.0.3,217.160.70.42,213.202.211.221,81.169.136.222,185.181.61.24,185.228.168.9,185.228.169.9,94.140.14.14,94.140.15.15,94.140.14.140,94.140.14.141,94.140.14.15,94.140.15.16,45.90.28.94,45.90.30.94,76.76.2.11,76.76.10.11,9.9.9.9,9.9.9.10,149.112.112.112,185.222.222.222,45.11.45.11,172.104.93.80
+--out-range=-d10
+--payload=tls_client_hello,http_req
+--lua-desync=multisplit:pos=1,27:seqovl=4:tcp_ts_up
+--lua-desync=fake:blob=tls_clienthello:tcp_md5:tcp_seq=10000:tls_mod=rnd,dupsid,sni=ozon.ru:repeats=3
+--new
+--filter-udp=443,853
+--filter-l7=quic
+--hostlist-domains=cloudflare-dns.com,dns.adguard-dns.com,dns.nextdns.io,nextdns.io,dns.google,controld.com
+--payload=quic_initial
+--lua-desync=send:ipfrag:ipfrag_pos_udp=88'
+
+# Fallback для nfqws1 (классический dpi-desync)
+DOT_DOH_STRATEGY_NFQWS1='#DNS
+--filter-tcp=443,853 --filter-l7=http,tls --hostlist-domains=dns.iij.jp,dot.sb,dns.sb,doh.sb,dns.google,dot.pub,doh.pub,controld.com,opendns.com,anycast.censurfridns.dk,dns.alidns.com,libredns.gr,cloudflare-dns.com,one.one.one.one,opennameserver.org,cleanbrowsing.org,dns.adguard-dns.com,dns.comss.one,xbox-dns.ru,dns.malw.link,geohide.ru,dns.nextdns.io,dns10.quad9.net --dpi-desync=multisplit,fake --dpi-desync-split-pos=1,host+2,midsld+2,endsld-2 --dpi-desync-split-seqovl=4 --dpi-desync-fooling=md5sig --dpi-desync-fake-tls=/opt/etc/nfqws/tls_clienthello.bin --dpi-desync-fake-tls-mod=rnd,dupsid,sni=ozon.ru --dpi-desync-repeats=3
+--new
+--filter-tcp=443,853 --filter-l7=http,tls --ipset-ip=104.16.248.249,104.16.249.249,91.239.100.100,89.233.43.71,8.8.8.8,8.8.4.4,1.12.12.12,120.53.53.120,208.67.222.222,208.67.220.220,223.5.5.5,223.6.6.6,116.202.176.26,1.1.1.1,1.0.0.1,1.1.1.2,1.0.0.2,1.1.1.3,1.0.0.3,217.160.70.42,213.202.211.221,81.169.136.222,185.181.61.24,185.228.168.9,185.228.169.9,94.140.14.14,94.140.15.15,94.140.14.140,94.140.14.141,94.140.14.15,94.140.15.16,45.90.28.94,45.90.30.94,76.76.2.11,76.76.10.11,9.9.9.9,9.9.9.10,149.112.112.112,185.222.222.222,45.11.45.11,172.104.93.80 --dpi-desync=multisplit,fake --dpi-desync-split-pos=1,27 --dpi-desync-split-seqovl=4 --dpi-desync-fooling=md5sig --dpi-desync-fake-tls=/opt/etc/nfqws/tls_clienthello.bin --dpi-desync-fake-tls-mod=rnd,dupsid,sni=ozon.ru --dpi-desync-repeats=3
+--new
+--filter-udp=443,853 --filter-l7=quic --hostlist-domains=cloudflare-dns.com,dns.adguard-dns.com,dns.nextdns.io,nextdns.io,dns.google,controld.com --dpi-desync=ipfrag2 --dpi-desync-ipfrag-pos-udp=88'
 
 ensure_port_in_var() {
   local conf_file="$1" var="$2" port="$3" line val new_val
@@ -2919,36 +2940,42 @@ ensure_port_in_var() {
   info "${var}: добавлен порт $port → ${new_val}"
 }
 
-menu_dot_doh() {
-  # refresh — кэш мог устареть; return 0 — set -e не должен выкидывать из меню
-  refresh_opkg_cache
-  if ! is_installed "nfqws2-keenetic"; then
-    error "Пункт доступен только при установленном nfqws2-keenetic."
+# Загрузить стратегию dns_filter для ver=1|2 в strat_tmp; return 0 при успехе
+load_dot_doh_strategy() {
+  local ver="$1" dest="$2"
+  local url="${RAW_BASE}/strategies/dns_filter_nfqws${ver}"
+  local tmp="/tmp/dns_filter_nfqws${ver}-$$.txt"
+
+  rm -f "$tmp"
+  if download_file "$url" "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+    # убрать CRLF и пустые ведущие строки
+    tr -d '\r' < "$tmp" | sed '/^[[:space:]]*$/d' > "$dest"
+    rm -f "$tmp"
+    # маркер #DNS в начало, если его нет
+    if ! grep -qE '^[[:space:]]*#DNS' "$dest" 2>/dev/null; then
+      { printf '%s\n' '#DNS'; cat "$dest"; } > "${dest}.n" && mv "${dest}.n" "$dest"
+    fi
+    info "Стратегия dns_filter_nfqws${ver} скачана с GitHub."
     return 0
   fi
-  local conf="/opt/etc/nfqws2/nfqws2.conf"
-  if [ ! -f "$conf" ]; then
-    error "Конфиг $conf не найден."
-    return 0
+  rm -f "$tmp"
+
+  warn "Не удалось скачать dns_filter_nfqws${ver} — используем встроенный fallback."
+  if [ "$ver" = "1" ]; then
+    printf '%s\n' "$DOT_DOH_STRATEGY_NFQWS1" > "$dest"
+  else
+    printf '%s\n' "$DOT_DOH_STRATEGY_NFQWS2" > "$dest"
   fi
+  return 0
+}
 
-  echo
-  confirm_yes "Добавить в NFQWS_ARGS_CUSTOM стратегию обхода блокировки DoT/DoH публичных DNS?" || {
-    info "Отменено."; return 0
-  }
-
-  if grep -qE '#DNS|dot\.pub,doh\.pub' "$conf" 2>/dev/null; then
-    warn "Похоже, стратегия DoT/DoH уже присутствует в конфиге."
-    confirm_no "Добавить повторно?" || { info "Отменено."; return 0; }
-  fi
-
-  backup_file "$conf"
-
-  local tmp="/tmp/nfqws2-conf-$$.tmp"
-  local strat_tmp="/tmp/nfqws2-dot-$$.txt"
-  printf '%s\n' "$DOT_DOH_STRATEGY" > "$strat_tmp"
-
+# Вставить содержимое strat_tmp в NFQWS_ARGS_CUSTOM конфига conf
+inject_custom_strategy() {
+  local conf="$1" strat_tmp="$2"
+  local tmp="/tmp/nfqws-conf-dot-$$.tmp"
   local found=0 in_block=0 has_content=0
+
+  : > "$tmp"
   while IFS= read -r line || [ -n "$line" ]; do
     if [ "$in_block" -eq 0 ]; then
       case "$line" in
@@ -3021,20 +3048,114 @@ menu_dot_doh() {
 
   if [ "$in_block" -eq 1 ]; then
     error "Не найдена закрывающая кавычка NFQWS_ARGS_CUSTOM — конфиг не изменён."
-    rm -f "$tmp" "$strat_tmp"
+    rm -f "$tmp"
     return 1
   fi
 
   mv "$tmp" "$conf"
+  return 0
+}
+
+apply_dot_doh_for_ver() {
+  local ver="$1"
+  local conf init_script strat_tmp svc_name
+
+  conf=$(nfqws_conf_path "$ver")
+  init_script=$(nfqws_init_path "$ver")
+  if [ "$ver" = "1" ]; then
+    svc_name="nfqws"
+  else
+    svc_name="nfqws2"
+  fi
+
+  if [ ! -f "$conf" ]; then
+    error "Конфиг $conf не найден."
+    return 1
+  fi
+
+  if grep -qE '#DNS|dot\.pub,doh\.pub|dns\.iij\.jp|xbox-dns\.ru' "$conf" 2>/dev/null; then
+    warn "Похоже, стратегия DoT/DoH уже присутствует в конфиге (nfqws${ver})."
+    confirm_no "Добавить повторно?" || { info "Пропуск nfqws${ver}."; return 0; }
+  fi
+
+  backup_file "$conf"
+
+  strat_tmp="/tmp/nfqws${ver}-dot-$$.txt"
+  load_dot_doh_strategy "$ver" "$strat_tmp" || {
+    rm -f "$strat_tmp"
+    return 1
+  }
+
+  if ! inject_custom_strategy "$conf" "$strat_tmp"; then
+    rm -f "$strat_tmp"
+    return 1
+  fi
   rm -f "$strat_tmp"
-  info "Стратегия DoT/DoH добавлена в NFQWS_ARGS_CUSTOM."
+
+  info "Стратегия DoT/DoH (dns_filter_nfqws${ver}) добавлена в NFQWS_ARGS_CUSTOM."
 
   echo
-  info "=== Проверка портов 853 (DoT) ==="
+  info "=== Проверка портов 853 (DoT) [nfqws${ver}] ==="
   ensure_port_in_var "$conf" "TCP_PORTS" "853"
   ensure_port_in_var "$conf" "UDP_PORTS" "853"
-  service_restart /opt/etc/init.d/S51nfqws2
-  info "Сервис nfqws2 перезапущен."
+  service_restart "$init_script"
+  info "Сервис $svc_name перезапущен."
+  return 0
+}
+
+menu_dot_doh() {
+  # refresh — кэш мог устареть; return 0 — set -e не должен выкидывать из меню
+  refresh_opkg_cache
+  local has1=0 has2=0
+  is_installed "nfqws-keenetic"  && has1=1
+  is_installed "nfqws2-keenetic" && has2=1
+
+  if [ "$has1" -eq 0 ] && [ "$has2" -eq 0 ]; then
+    error "Пункт доступен при установленном nfqws-keenetic и/или nfqws2-keenetic."
+    return 0
+  fi
+
+  echo
+  info "Стратегии: dns_filter_nfqws1 / dns_filter_nfqws2"
+  info "  https://github.com/rndnaame/nfqws-menu/blob/main/strategies/dns_filter_nfqws1"
+  info "  https://github.com/rndnaame/nfqws-menu/blob/main/strategies/dns_filter_nfqws2"
+  echo
+
+  if [ "$has1" -eq 1 ] && [ "$has2" -eq 1 ]; then
+    echo "Установлены обе версии."
+    echo "  1) nfqws-keenetic  (v1) — dns_filter_nfqws1"
+    echo "  2) nfqws2-keenetic (v2) — dns_filter_nfqws2"
+    echo "  a) Обе"
+    ask "${LBL_YOUR_CHOICE} [0 = отмена]: "
+    read_menu c
+    case "$c" in
+      1)
+        confirm_yes "Добавить стратегию обхода DoT/DoH в NFQWS_ARGS_CUSTOM (nfqws1)?" || { info "Отменено."; return 0; }
+        apply_dot_doh_for_ver 1 || true
+        ;;
+      2)
+        confirm_yes "Добавить стратегию обхода DoT/DoH в NFQWS_ARGS_CUSTOM (nfqws2)?" || { info "Отменено."; return 0; }
+        apply_dot_doh_for_ver 2 || true
+        ;;
+      a|A|а|А)
+        confirm_yes "Добавить стратегию обхода DoT/DoH в оба конфига?" || { info "Отменено."; return 0; }
+        apply_dot_doh_for_ver 1 || true
+        apply_dot_doh_for_ver 2 || true
+        ;;
+      *) info "Отменено."; return 0 ;;
+    esac
+  elif [ "$has1" -eq 1 ]; then
+    confirm_yes "Добавить в NFQWS_ARGS_CUSTOM стратегию обхода блокировки DoT/DoH (nfqws1)?" || {
+      info "Отменено."; return 0
+    }
+    apply_dot_doh_for_ver 1 || true
+  else
+    confirm_yes "Добавить в NFQWS_ARGS_CUSTOM стратегию обхода блокировки DoT/DoH (nfqws2)?" || {
+      info "Отменено."; return 0
+    }
+    apply_dot_doh_for_ver 2 || true
+  fi
+  return 0
 }
 
 # ---------------------------------------------------------------------------
