@@ -39,6 +39,7 @@ CF_API_HOST="api.cloudflareclient.com"
 CF_API_IP="104.16.24.84"
 DINIBOY_REPO="Diniboy1123/usque"
 TMPDIR="/tmp/usque-installer-$$"
+trap 'rm -rf "$TMPDIR" /tmp/usque-http-body-$$ /tmp/usque-ifaces-$$ /tmp/usque-if-skip-$$ /tmp/usque-curl-err-$$ 2>/dev/null' EXIT INT TERM
 
 # ---------------------------------------------------------------------------
 # Архитектура — логика как в nfqws-menu.sh
@@ -331,30 +332,25 @@ _http_get_one() {
 }
 
 http_get() {
-  # http_get URL DEST — с перебором зеркал
+  # http_get URL DEST — с перебором зеркал (без pipe/subshell)
   url="$1"
   dest="$2"
   if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
     error "Нужны curl или wget."
     return 1
   fi
-  rm -f "$dest"
-  github_alt_urls "$url" | while IFS= read -r alt || [ -n "$alt" ]; do
+  rm -f "$dest" "${dest}.ok"
+  # URL без пробелов — for безопасен
+  for alt in $(github_alt_urls "$url"); do
     [ -n "$alt" ] || continue
     info "Пробуем: $alt"
     if _http_get_one "$alt" "$dest" && [ -s "$dest" ]; then
       [ "$alt" != "$url" ] && info "Скачано через зеркало"
-      # while в пайпе — нельзя return наружу; маркер успеха
-      echo OK > "${dest}.ok"
-      break
+      return 0
     fi
     rm -f "$dest"
   done
-  if [ -f "${dest}.ok" ] && [ -s "$dest" ]; then
-    rm -f "${dest}.ok"
-    return 0
-  fi
-  rm -f "${dest}.ok" "$dest"
+  rm -f "$dest"
   return 1
 }
 
@@ -882,13 +878,8 @@ COLO_CACHE="/tmp/usque-dc-colos.json"
 COLO_LIST_URL="https://raw.githubusercontent.com/Netrvin/cloudflare-colo-list/main/DC-Colos.json"
 
 ensure_colo_cache() {
-  if [ -s "$COLO_CACHE" ]; then
-    # не старше ~7 дней
-    if [ -n "$(find "$COLO_CACHE" -mtime -7 2>/dev/null)" ] || [ -s "$COLO_CACHE" ]; then
-      # find -mtime может отсутствовать на busybox — достаточно наличия файла
-      return 0
-    fi
-  fi
+  # достаточно наличия файла (повторная загрузка при отсутствии)
+  [ -s "$COLO_CACHE" ] && return 0
   info "Справочник colo (Netrvin/cloudflare-colo-list)..."
   if http_get "$COLO_LIST_URL" "$COLO_CACHE" && [ -s "$COLO_CACHE" ]; then
     return 0
@@ -936,7 +927,7 @@ lookup_colo() {
   esac
   if ensure_colo_cache 2>/dev/null; then
     # "HEL": { ... "name": "Helsinki, Finland" ... }
-    name=$(sed -n "/"$code":/,/}/p" "$COLO_CACHE" 2>/dev/null | sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+    name=$(sed -n "/\"$code\":/,/}/p" "$COLO_CACHE" 2>/dev/null | sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
     if [ -n "$name" ]; then
       printf '%s' "$name"
       return 0
@@ -1064,33 +1055,6 @@ list_candidate_ifaces() {
   printf '%s\n' $_if_list | tr ' ' '\n' | grep -v '^$' | sort -u
 }
 
-# Интерфейс UP? (operstate / flags)
-iface_is_up() {
-  ifc="$1"
-  if [ -r "/sys/class/net/$ifc/operstate" ]; then
-    st=$(cat "/sys/class/net/$ifc/operstate" 2>/dev/null)
-    case "$st" in
-      up|unknown) return 0 ;;  # unknown часто у tun
-      *) return 1 ;;
-    esac
-  fi
-  if command -v ip >/dev/null 2>&1; then
-    ip -o link show "$ifc" 2>/dev/null | grep -q ',UP' && return 0
-  fi
-  return 1
-}
-
-# Есть IPv4 на интерфейсе?
-iface_has_ipv4() {
-  ifc="$1"
-  if command -v ip >/dev/null 2>&1; then
-    ip -4 -o addr show dev "$ifc" 2>/dev/null | grep -q 'inet '
-    return $?
-  fi
-  ifconfig "$ifc" 2>/dev/null | grep -q 'inet addr:\|inet '
-  return $?
-}
-
 # Кэш RCI show/interface (локально, быстро)
 RCI_IFACE_JSON=""
 rci_fetch_interfaces() {
@@ -1164,37 +1128,23 @@ iface_desc_of() {
 }
 
 # Кандидаты: opkgtun*/nwg*/awg* ∩ global:true
-# stdout: linux  или  linux|description
+# stdout: name|description
 list_check_ifaces() {
-  rm -f /tmp/usque-if-skip-$$
   cands=$(list_candidate_ifaces)
   [ -n "$cands" ] || return 0
 
   globals=$(list_global_linux_ifaces 2>/dev/null) || globals=""
   if [ -z "$globals" ] && [ -z "$RCI_IFACE_JSON" ]; then
     warn "RCI show/interface недоступен"
-    printf '%s\n' "$cands" | while IFS= read -r ifc || [ -n "$ifc" ]; do
-      [ -n "$ifc" ] || continue
-      printf 'SKIP %s no-rci\n' "$ifc" >> /tmp/usque-if-skip-$$
-    done
     return 0
   fi
 
-  # имена из globals (до |)
   gnames=$(printf '%s\n' "$globals" | awk -F'|' '{print $1}')
-
   printf '%s\n' "$cands" | while IFS= read -r ifc || [ -n "$ifc" ]; do
     [ -n "$ifc" ] || continue
-    if printf '%s\n' "$gnames" | grep -qxF "$ifc"; then
-      desc=$(iface_desc_of "$ifc" "$globals")
-      if [ -n "$desc" ]; then
-        printf '%s|%s\n' "$ifc" "$desc"
-      else
-        printf '%s|\n' "$ifc"
-      fi
-    else
-      printf 'SKIP %s no-global\n' "$ifc" >> /tmp/usque-if-skip-$$
-    fi
+    printf '%s\n' "$gnames" | grep -qxF "$ifc" || continue
+    desc=$(iface_desc_of "$ifc" "$globals")
+    printf '%s|%s\n' "$ifc" "$desc"
   done
 }
 
@@ -1202,38 +1152,24 @@ list_check_ifaces() {
 # Результат в CHECK_IFACE (не stdout — иначе info попадает в $(...))
 pick_check_iface() {
   CHECK_IFACE=""
-  conf_iface=$(get_usque_iface)
-  info "IFACE из конфига: ${conf_iface} (${CONF_FILE})"
+  conf_iface=""
+  if [ -f "$CONF_FILE" ]; then
+    conf_iface=$(get_usque_iface)
+    info "IFACE из конфига: ${conf_iface} (${CONF_FILE})"
+  fi
 
   info "Поиск интерфейсов opkgtun*/nwg*/awg* с global: true..."
-  rm -f /tmp/usque-if-skip-$$
-    avail_raw=$(list_check_ifaces)
+  RCI_IFACE_JSON=""
+  avail_raw=$(list_check_ifaces)
   # формат: name|description
   avail=$(printf '%s\n' "$avail_raw" | awk -F'|' '{print $1}' | grep -v '^$' | sort -u)
-  # показать отброшенные
-  if [ -f /tmp/usque-if-skip-$$ ]; then
-    while IFS= read -r line || [ -n "$line" ]; do
-      [ -n "$line" ] || continue
-      sk=$(printf '%s' "$line" | awk '{print $2}')
-      reason=$(printf '%s' "$line" | awk '{print $3}')
-      case "$reason" in
-        down) printf '%s\n' "${DIM}  - $sk (down)${NC}" ;;
-        no-ip) printf '%s\n' "${DIM}  - $sk (нет IPv4)${NC}" ;;
-        no-global) printf '%s\n' "${DIM}  - $sk (global != true)${NC}" ;;
-        no-rci) printf '%s\n' "${DIM}  - $sk (нет RCI)${NC}" ;;
-        *) printf '%s\n' "${DIM}  - $sk ($reason)${NC}" ;;
-      esac
-    done < /tmp/usque-if-skip-$$
-    rm -f /tmp/usque-if-skip-$$
-  fi
 
   n=$(printf '%s\n' "$avail" | grep -c . 2>/dev/null || echo 0)
   case "$n" in ''|*[!0-9]*) n=0 ;; esac
 
   if [ "$n" -eq 0 ]; then
     warn "Нет интерфейсов opkgtun*/nwg*/awg* с global: true."
-    # предложить conf даже если offline — пользователь может хотеть диагностику
-    if [ -n "$conf_iface" ]; then
+    if [ -f "$CONF_FILE" ] && [ -n "$conf_iface" ]; then
       if confirm_yes "Проверить conf IFACE ($conf_iface) всё равно?"; then
         CHECK_IFACE="$conf_iface"
         return 0
