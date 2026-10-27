@@ -4,7 +4,7 @@
 
 Репозиторий также служит хранилищем готовых **стратегий** обхода DPI, **blobs** и **lists**.
 
-- Скрипт: `nfqws-menu.sh` (текущая версия **0.10.18**)
+- Скрипт: `nfqws-menu.sh` (текущая версия **0.10.19**)
 - Стратегии: `strategies/`
 - Hosts: `hosts`
 - Контрольные суммы: `SHA256SUMS`, `strategies/blobs/SHA256SUMS`
@@ -166,7 +166,7 @@ menu
 #### Восстановление rkn.list и POLICY\_\*
 
 - Если до смены стратегии в `MODE_LIST` уже был `--hostlist=…/rkn.list`, привязка **восстанавливается** автоматически.
-- `POLICY_NAME` **/** `POLICY_EXCLUDE`: стандартные значения (`nfqws` / `0`) не трогаются; **нестандартные** предлагается восстановить (**по умолчанию: Нет**).
+- `POLICY_NAME` **/** `POLICY_EXCLUDE`: стандартные значения (`nfqws` / `0`) не трогаются; **нестандартные** предлагается восстановить (**по умолчанию: Да** — `[Y/n]`).
 
 #### Проверка blobs (наличие + SHA256)
 
@@ -290,7 +290,7 @@ menu
 
 | Команда / действие | Описание |
 | --- | --- |
-| **меню** (без аргументов) | интерактив: статус, включить, выключить, исключить порты Discord из XKeen (если установлен); отдельной настройки портов нет |
+| **меню** (без аргументов) | интерактив: статус, включить, выключить, порты, XKeen |
 | `status` | диагностика: nfqws2, правила, порты, лог |
 | `apply` | включить fullsession (порты по умолчанию `19294:19344,50000:50100`; можно `PORTS=…`) |
 | `remove` | выключить и удалить правила/хуки |
@@ -420,7 +420,7 @@ curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_
 
 Проба есть с версии **2.4.5**; у более старого бинаря меню предложит обновиться.
 
-Если секрет остался от Go-версии, меню переносит его до установки — тогда ссылки клиентов не меняются. При отсутствии готового секрета его создаёт штатный `install.sh` проекта.
+Секрет меню пишет само, до установки: генератор секрета в `install.sh` проекта использует `od -An`, которого BusyBox не знает, и на боксе без готового секрета установка падает. Если секрет остался от Go-версии, переносится он — тогда ссылки клиентов не меняются.
 
 ### 17. firc
 
@@ -432,11 +432,9 @@ curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_
 curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_firc.sh | sh
 ```
 
-Пункт **17** запускает удалённый `installer_firc.sh`. В его меню:
-
 1. **Установка / обновление firc** — `src/gz hoaxisr` → `/opt/etc/opkg/awg_manager.conf` ([repo.hoaxisr.ru](https://repo.hoaxisr.ru/)), затем `opkg update && opkg install firc`
-2. **Удаление firc** — `opkg remove` (`awg_manager.conf` не трогает)
-3. **Диагностика**
+2. **Удаление firc** — `opkg remove` (`awg_manager.conf` не трогаем)
+3. **Полное меню** — remote `installer_firc.sh` (диагностика и т.п.)
 
 - Init: `/opt/etc/init.d/S99firc` (start | stop | restart | status)
 - WebUI: обычно порт **666**
@@ -480,14 +478,25 @@ curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_
 
 ## Changelog
 
+### 0.10.16
+
+- **п. 2 apply_strategy** — восстановление нестандартных `POLICY_NAME` / `POLICY_EXCLUDE` по умолчанию **Да** (`[Y/n]`)
+
 ### 0.10.15
 
 - **п. 9** — возвращён **Discord: все пакеты в nfqws2** (`nfqws2_fullsession.sh`): пропал в 0.10.7 при выносе п.16 в отдельный installer
 - README: описание п.9; убраны лишние варианты установки меню (Fastly / curl-jsDelivr / ghproxy)
+- зависимости: `ca-certificates`, `opkg remove wget-nossl`
 
 ### 0.10.10 – 0.10.14
 
 - **S → 3. Починить OPKG**: зеркала `sw.ext.io/entware` и `sw.ext.io/nfqws{,2,-web}`; probe доп. репо; github.io → sw при fail/hang; IPv4 wget; timeout `opkg update` 60 с; repair status/lock
+
+### 0.10.19
+
+- **SHA256SUMS cache** — скачивание во временный файл, `mv` только при успехе (PR #24)
+- README: уточнения IPSet / язык / hosts п.7 / tg-ws-proxy-rs (PR #25)
+- UI: подпись стандартного IPSet без опечатки «офиставка»
 
 ### 0.10.7 – 0.10.9
 
