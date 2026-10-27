@@ -375,9 +375,24 @@ tg_ws_proxy_rs_choose_variant() {
   return 0
 }
 
+# Запуск upstream install.sh. $1=script $2=upx_arg $3=GH_MIRROR (пусто = прямой GitHub).
+# stdout — вывод установщика; return = его код.
+tg_ws_proxy_rs_run_upstream() {
+  local script="$1" upx_arg="$2" mirror="$3"
+  if [ -n "$mirror" ]; then
+    # upstream: dl() → $GH_MIRROR${url#https://github.com}
+    # пример: https://ghproxy.net/https://github.com + /owner/repo/releases/...
+    GH_MIRROR="$mirror" sh "$script" --platform entware $upx_arg 2>&1
+  else
+    # ash/BusyBox: без env -u; сбрасываем только в подshell
+    ( unset GH_MIRROR; sh "$script" --platform entware $upx_arg ) 2>&1
+  fi
+}
+
 tg_ws_proxy_rs_install() {
   local url="https://raw.githubusercontent.com/${TG_WS_PROXY_RS_REPO}/main/install.sh"
   local script="/tmp/tgws-install.$$.sh" out rc upx_arg='' bin_size size_text
+  local mirror mirrors tried
   tg_ws_proxy_rs_choose_variant || return 1
   [ "$TG_WS_PROXY_RS_UPX" = "1" ] && upx_arg='--upx'
   if ! download_sh_validated "$url" "$script" 20000; then
@@ -388,11 +403,40 @@ tg_ws_proxy_rs_install() {
   info "Установка из релиза…"
   # --platform entware: у установщика отдельная ветка для OpenWrt/LuCI, а на
   # Keenetic нужен путь Entware (/opt + rc.unslung).
-  # Вывод показываем под отступом и без строк, которые дальше повторяет меню:
-  # ссылку оно печатает само (и только после проверки связи), а «Rollback
-  # backup» дублирует «Backup» тем же путём.
-  out=$(sh "$script" --platform entware $upx_arg 2>&1)
+  #
+  # Upstream install.sh качает релиз с github.com; при DPI/блокировке нужен
+  # GH_MIRROR (см. upstream README). Пробуем: прямой → пользовательский →
+  # известные прокси.
+  mirrors=""
+  # если пользователь уже задал GH_MIRROR — пробуем его вторым (после прямого)
+  [ -n "${GH_MIRROR:-}" ] && mirrors="$mirrors ${GH_MIRROR}"
+  mirrors="$mirrors https://ghproxy.net/https://github.com"
+  mirrors="$mirrors https://mirror.ghproxy.com/https://github.com"
+  mirrors="$mirrors https://gh.ddlc.top/https://github.com"
+  mirrors="$mirrors https://gitclone.com/github.com"
+
+  tried=0
+  rc=1
+  out=""
+  # 1) без зеркала
+  out=$(tg_ws_proxy_rs_run_upstream "$script" "$upx_arg" "")
   rc=$?
+  tried=$((tried + 1))
+  # 2) зеркала, только если упало на скачивании архива
+  if [ "$rc" -ne 0 ]; then
+    case "$out" in
+      *'cannot download'*|*'set GH_MIRROR'*|*'Failed to connect'*|*'Could not resolve'*)
+        for mirror in $mirrors; do
+          [ -n "$mirror" ] || continue
+          warn "GitHub недоступен — повтор через зеркало: $mirror"
+          out=$(tg_ws_proxy_rs_run_upstream "$script" "$upx_arg" "$mirror")
+          rc=$?
+          tried=$((tried + 1))
+          [ "$rc" -eq 0 ] && break
+        done
+        ;;
+    esac
+  fi
   rm -f "$script"
   # Инсталлер красит вывод ANSI-кодами, поэтому сначала снимаем цвет (меню
   # красит само), затем убираем строки, которые дальше повторяет меню: ссылку
@@ -404,7 +448,9 @@ tg_ws_proxy_rs_install() {
     | grep -v -e '^Proxy link:' -e '^Rollback backup:' \
     | sed 's/^/    /'
   if [ "$rc" -ne 0 ]; then
-    error "install.sh завершился с ошибкой."
+    error "install.sh завершился с ошибкой (попыток: $tried)."
+    warn "Задайте зеркало вручную: GH_MIRROR=https://ghproxy.net/https://github.com"
+    warn "и повторите пункт 16, либо скачайте tar.gz с релизов и укажите --archive."
     return 1
   fi
   is_tg_ws_proxy_rs_installed || { error "Бинарь не найден: $TG_WS_PROXY_RS_BIN"; return 1; }
