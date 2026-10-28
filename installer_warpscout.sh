@@ -561,14 +561,136 @@ awg_list_tunnels() {
         tname=$(printf '%s' "$chunk" | sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
         tstat=$(printf '%s' "$chunk" | sed -n 's/.*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
         tend=$(printf '%s' "$chunk" | sed -n 's/.*"endpoint"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+        # "address":"172.16.0.3, 2606:..." или "172.16.0.2/32"
+        taddr=$(printf '%s' "$chunk" | sed -n 's/.*"address"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+        taddr_v4=$(printf '%s' "$taddr" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | \
+          sed -n 's|^\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)\(/[0-9]*\)\{0,1\}$|\1|p' | head -1)
         # отсекаем куски без status (вложенные pingCheck и т.п.)
         [ -n "$tstat" ] || continue
-        printf '%s|%s|%s|%s\n' "$tid" "${tname:-?}" "${tstat:-?}" "${tend:-}" >> "$out"
+        # id|name|status|endpoint|ipv4
+        printf '%s|%s|%s|%s|%s\n' "$tid" "${tname:-?}" "${tstat:-?}" "${tend:-}" "${taddr_v4:-}" >> "$out"
         ;;
     esac
   done < "$tmpc"
   rm -f "$tmpc" 2>/dev/null || true
   [ -s "$out" ]
+}
+
+# IPv4 из строки Address conf (без /prefix)
+awg_conf_ipv4() {
+  conf="$1"
+  grep -iE '^[[:space:]]*Address[[:space:]]*=' "$conf" 2>/dev/null | head -1 | \
+    sed 's/^[^=]*=[[:space:]]*//' | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | \
+    sed -n 's|^\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)\(/[0-9]*\)\{0,1\}$|\1|p' | head -1
+}
+
+# Подставить Address = IP/32 в conf (сохраняя остальное)
+awg_patch_conf_address() {
+  conf="$1"
+  newip="$2"
+  [ -f "$conf" ] || return 1
+  [ -n "$newip" ] || return 1
+  tmp="$conf.addrnew"
+  if grep -qiE '^[[:space:]]*Address[[:space:]]*=' "$conf" 2>/dev/null; then
+    # заменяем только первый IPv4 в значении; префикс /32 если был или по умолчанию
+    sed -E "s|^([[:space:]]*[Aa][Dd][Dd][Rr][Ee][Ss][Ss][[:space:]]*=[[:space:]]*)[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?|\1${newip}/32|" \
+      "$conf" > "$tmp" 2>/dev/null || return 1
+  else
+    # добавить в [Interface]
+    if grep -q '^\[Interface\]' "$conf" 2>/dev/null; then
+      awk -v ip="$newip" '
+        BEGIN { done=0 }
+        /^\[Interface\]/ { inif=1 }
+        inif && /^\[/ && !/^\[Interface\]/ {
+          if (!done) { print "Address = " ip "/32"; done=1 }
+          inif=0
+        }
+        { print }
+        END { if (!done) print "Address = " ip "/32" }
+      ' "$conf" > "$tmp" 2>/dev/null || return 1
+    else
+      { printf 'Address = %s/32\n' "$newip"; cat "$conf"; } > "$tmp" || return 1
+    fi
+  fi
+  mv -f "$tmp" "$conf" || return 1
+  return 0
+}
+
+# Если IPv4 conf занят другими туннелями (кроме skip_id) — взять свободный 172.16.0.x
+# listf: id|name|status|endpoint|ipv4
+# conf: файл для правки
+awg_ensure_free_address() {
+  conf="$1"
+  listf="$2"
+  skip_id="${3:-}"
+
+  cur=$(awg_conf_ipv4 "$conf")
+  if [ -z "$cur" ]; then
+    warn "В conf нет Address (IPv4) — пропускаем проверку конфликта."
+    return 0
+  fi
+
+  conflict=0
+  if [ -s "$listf" ]; then
+    while IFS='|' read -r tid _tname _tstat _tend taddr || [ -n "$tid" ]; do
+      [ -n "$tid" ] || continue
+      [ -n "$taddr" ] || continue
+      if [ -n "$skip_id" ] && [ "$tid" = "$skip_id" ]; then
+        continue
+      fi
+      if [ "$taddr" = "$cur" ]; then
+        conflict=1
+        warn "Адрес $cur уже у туннеля $tid — ищем свободный."
+        break
+      fi
+    done < "$listf"
+  fi
+
+  if [ "$conflict" != "1" ]; then
+    info "Address $cur свободен (или только у текущего туннеля)."
+    return 0
+  fi
+
+  # собрать занятые
+  usedf="$TMPDIR/used-addr.txt"
+  : > "$usedf"
+  if [ -s "$listf" ]; then
+    while IFS='|' read -r tid _tname _tstat _tend taddr || [ -n "$tid" ]; do
+      [ -n "$taddr" ] || continue
+      if [ -n "$skip_id" ] && [ "$tid" = "$skip_id" ]; then
+        continue
+      fi
+      printf '%s\n' "$taddr" >> "$usedf"
+    done < "$listf"
+  fi
+
+  # предпочитаем 172.16.0.2 .. 172.16.0.254
+  free=""
+  n=2
+  while [ "$n" -le 254 ]; do
+    cand="172.16.0.$n"
+    if ! grep -qxF "$cand" "$usedf" 2>/dev/null; then
+      free="$cand"
+      break
+    fi
+    n=$((n + 1))
+  done
+
+  if [ -z "$free" ]; then
+    error "Нет свободного адреса в 172.16.0.0/24"
+    return 1
+  fi
+
+  if awg_patch_conf_address "$conf" "$free"; then
+    info "Address: $cur → $free"
+    # синхронизировать основной conf на диске, если conf — рабочая копия
+    if [ "$conf" != "$CONF_OUT" ] && [ -f "$CONF_OUT" ]; then
+      awg_patch_conf_address "$CONF_OUT" "$free" 2>/dev/null || true
+    fi
+    return 0
+  fi
+  error "Не удалось записать Address = $free"
+  return 1
 }
 
 # Разбор секции «Best endpoint per node» из list → файл: NODE|ENDPOINT|TUN_PING|LOSS|LOCATION
@@ -797,11 +919,12 @@ do_apply_awg() {
   printf '%s\n' "${BOLD}Туннели awg-manager:${NC}"
   i=0
   if [ -s "$listf" ]; then
-    while IFS='|' read -r tid tname tstat tend || [ -n "$tid" ]; do
+    while IFS='|' read -r tid tname tstat tend taddr || [ -n "$tid" ]; do
       [ -n "$tid" ] || continue
       i=$((i + 1))
-      printf '  %s%d)%s  %s  %s[%s]%s  %s\n' \
-        "$BOLD" "$i" "$NC" "$tid" "$DIM" "$tstat" "$NC" "${tname}${tend:+ · $tend}"
+      printf '  %s%d)%s  %s  %s[%s]%s  %s%s\n' \
+        "$BOLD" "$i" "$NC" "$tid" "$DIM" "$tstat" "$NC" \
+        "${tname}${tend:+ · $tend}" "${taddr:+ · $taddr}"
     done < "$listf"
   fi
   new_idx=$((i + 1))
@@ -816,8 +939,12 @@ do_apply_awg() {
     0|"") info "Отменено."; return 0 ;;
   esac
 
-  # импорт нового
+  # импорт нового — конфликт Address со всеми существующими туннелями
   if [ "$sel" = "$new_idx" ]; then
+    if ! awg_ensure_free_address "$conf_use" "$listf" ""; then
+      return 1
+    fi
+
     def_name="WARP-${SELECTED_NODE}"
     printf '%s' "${YELLOW}[?]${NC} Имя нового туннеля [${def_name}]: "
     tname=$(read_choice)
@@ -865,6 +992,11 @@ do_apply_awg() {
   tname=$(sed -n "${sel}p" "$listf" | cut -d'|' -f2)
   if [ -z "$tid" ]; then
     error "Не удалось определить id туннеля."
+    return 1
+  fi
+
+  # replace: конфликт Address с другими туннелями (не с tid)
+  if ! awg_ensure_free_address "$conf_use" "$listf" "$tid"; then
     return 1
   fi
 
