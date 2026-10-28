@@ -3,6 +3,9 @@
 # Репозиторий: https://github.com/vernette/warpscout
 # Обёртка: https://github.com/rndnaame/nfqws-menu
 #
+# Версионирование (MAJOR.MINOR.PATCH): при любых правках бампать SCRIPT_VERSION.
+#   PATCH — мелкие фиксы; MINOR — новое поведение; MAJOR — ломающие изменения.
+#
 # 1) Установка / обновление warpscout
 # 2) Создать аккаунт (warpscout register)
 # 3) Сканирование адресов (AWG → list + conf)
@@ -12,6 +15,8 @@
 # Запуск:
 #   sh installer_warpscout.sh
 #   curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_warpscout.sh | sh
+
+SCRIPT_VERSION="0.1.6"
 
 # ANSI (portable для ash/BusyBox)
 RED=$(printf '\033[0;31m')
@@ -1073,7 +1078,7 @@ main_menu() {
   while true; do
     clear 2>/dev/null || true
     printf '%s\n' "${CYAN}================================================${NC}"
-    printf '%s\n' "${CYAN}${BOLD}                  warpscout${NC}"
+    printf '%s\n' "${CYAN}${BOLD}           warpscout  v${SCRIPT_VERSION}${NC}"
     printf '%s\n' "${CYAN}================================================${NC}"
     echo
     printf '%s\n' "${DIM}  Поиск рабочих эндпоинтов Cloudflare WARP${NC}"
