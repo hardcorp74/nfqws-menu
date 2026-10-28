@@ -571,6 +571,182 @@ awg_list_tunnels() {
   [ -s "$out" ]
 }
 
+# Разбор секции «Best endpoint per node» из list → файл: NODE|ENDPOINT|TUN_PING|LOSS|LOCATION
+# Пример строки:
+# ARN    188.114.96.199:2408    27ms          25ms      0%     RU         Stockholm, SE
+awg_parse_best_endpoints() {
+  list="$1"
+  out="$2"
+  : > "$out"
+  [ -f "$list" ] || return 1
+
+  in_best=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      *'Best endpoint per node'*)
+        in_best=1
+        continue
+        ;;
+    esac
+    [ "$in_best" = "1" ] || continue
+    # пропускаем заголовок таблицы и пустые
+    case "$line" in
+      ''|\#*) continue ;;
+      NODE[[:space:]]*) continue ;;
+    esac
+    # NODE ENDPOINT ... LOSS SEEN NODE_LOCATION...
+    # awk: $1=NODE $2=ENDPOINT $5=LOSS $7+=location (после SEEN AS)
+    set -- $line
+    node="$1"
+    ep="$2"
+    # минимум: NODE + ip:port
+    [ -n "$node" ] && [ -n "$ep" ] || continue
+    case "$ep" in
+      *:* ) ;;
+      *) continue ;;
+    esac
+    # tun ping / loss — позиции зависят от выравнивания; ищем LOSS как *%
+    loss=""
+    tunp=""
+    loc=""
+    # проход по полям
+    i=0
+    for f in $line; do
+      i=$((i + 1))
+      case "$f" in
+        *ms)
+          # первое *ms после endpoint — ENDPOINT PING, второе — TUN PING
+          if [ -z "$tunp" ]; then
+            # пропускаем endpoint ping (первое ms после ep)
+            if [ "$i" -gt 2 ]; then
+              if [ -z "$_ep_ping" ]; then
+                _ep_ping="$f"
+              else
+                tunp="$f"
+              fi
+            fi
+          fi
+          ;;
+        *%)
+          [ -z "$loss" ] && loss="$f"
+          ;;
+      esac
+    done
+    # location: всё после SEEN AS (обычно 2-буквенный код страны)
+    # проще: с конца — NODE LOCATION = поля после LOSS и SEEN
+    loc=$(printf '%s\n' "$line" | awk '{
+      # найти поле с % (LOSS), следующее — SEEN AS, остальное — location
+      for (i=1;i<=NF;i++) if ($i ~ /%$/) { start=i+2; break }
+      loc=""
+      for (j=start;j<=NF;j++) loc = (loc ? loc " " : "") $j
+      print loc
+    }')
+    tunp=$(printf '%s\n' "$line" | awk '{
+      n=0
+      for (i=3;i<=NF;i++) if ($i ~ /ms$/) { n++; if (n==2) { print $i; exit } }
+    }')
+    loss=$(printf '%s\n' "$line" | awk '{
+      for (i=1;i<=NF;i++) if ($i ~ /%$/) { print $i; exit }
+    }')
+    _ep_ping=""
+    printf '%s|%s|%s|%s|%s\n' "$node" "$ep" "${tunp:-?}" "${loss:-?}" "${loc:-}" >> "$out"
+  done < "$list"
+  [ -s "$out" ]
+}
+
+# Выбор endpoint из best-per-node. Результат: SELECTED_EP, SELECTED_NODE
+awg_pick_endpoint() {
+  SELECTED_EP=""
+  SELECTED_NODE=""
+  bestf="$TMPDIR/best-ep.txt"
+  mkdir -p "$TMPDIR" 2>/dev/null || true
+
+  if [ ! -f "$SCAN_OUT" ] || [ ! -s "$SCAN_OUT" ]; then
+    error "Нет списка: $SCAN_OUT (сначала п. 3)."
+    return 1
+  fi
+  if ! awg_parse_best_endpoints "$SCAN_OUT" "$bestf"; then
+    error "Не удалось разобрать «Best endpoint per node» в $SCAN_OUT"
+    return 1
+  fi
+
+  echo
+  printf '%s\n' "${BOLD}Лучший endpoint по нодам (из list):${NC}"
+  i=0
+  while IFS='|' read -r node ep tunp loss loc || [ -n "$node" ]; do
+    [ -n "$node" ] || continue
+    i=$((i + 1))
+    mark=""
+    case "$node" in
+      DME) mark=" ${YELLOW}(часто DPI)${NC}" ;;
+    esac
+    printf '  %s%d)%s  %s%-4s%s  %s  %s[tun %s · loss %s]%s  %s%s\n' \
+      "$BOLD" "$i" "$NC" "$CYAN" "$node" "$NC" "$ep" \
+      "$DIM" "$tunp" "$loss" "$NC" "${loc}" "$mark"
+  done < "$bestf"
+
+  # текущий Endpoint из conf
+  cur=$(grep -iE '^[[:space:]]*Endpoint[[:space:]]*=' "$CONF_OUT" 2>/dev/null | head -1 | sed 's/^[^=]*=[[:space:]]*//;s/[[:space:]]*$//')
+  [ -n "$cur" ] && printf '%s\n' "${DIM}  сейчас в conf: Endpoint = ${cur}${NC}"
+
+  echo "  0) Отмена"
+  echo
+  printf '  %sВыбор endpoint:%s ' "$BOLD" "$NC"
+  sel=$(read_choice)
+  echo
+
+  case "$sel" in
+    0|"") info "Отменено."; return 1 ;;
+    *[!0-9]*) warn "Неверный выбор."; return 1 ;;
+  esac
+  if [ "$sel" -lt 1 ] || [ "$sel" -gt "$i" ]; then
+    warn "Неверный номер."; return 1
+  fi
+
+  SELECTED_NODE=$(sed -n "${sel}p" "$bestf" | cut -d'|' -f1)
+  SELECTED_EP=$(sed -n "${sel}p" "$bestf" | cut -d'|' -f2)
+  if [ -z "$SELECTED_EP" ]; then
+    error "Пустой endpoint."
+    return 1
+  fi
+  info "Выбрано: $SELECTED_NODE → $SELECTED_EP"
+  return 0
+}
+
+# Подставить Endpoint в conf → dest (остальное без изменений)
+awg_patch_conf_endpoint() {
+  src="$1"
+  dest="$2"
+  ep="$3"
+  [ -f "$src" ] || return 1
+  [ -n "$ep" ] || return 1
+
+  if grep -qiE '^[[:space:]]*Endpoint[[:space:]]*=' "$src" 2>/dev/null; then
+    # сохраняем отступ и регистр ключа
+    sed -E "s|^([[:space:]]*[Ee][Nn][Dd][Pp][Oo][Ii][Nn][Tt][[:space:]]*=[[:space:]]*).*$|\1${ep}|" \
+      "$src" > "$dest" 2>/dev/null || return 1
+  else
+    # добавить в конец секции [Peer], иначе в конец файла
+    if grep -q '^\[Peer\]' "$src" 2>/dev/null; then
+      awk -v ep="$ep" '
+        BEGIN { done=0 }
+        /^\[Peer\]/ { inpeer=1 }
+        inpeer && /^\[/ && !/^\[Peer\]/ {
+          if (!done) { print "Endpoint = " ep; done=1 }
+          inpeer=0
+        }
+        { print }
+        END { if (!done) print "Endpoint = " ep }
+      ' "$src" > "$dest" 2>/dev/null || return 1
+    else
+      { cat "$src"; printf '\nEndpoint = %s\n' "$ep"; } > "$dest" || return 1
+    fi
+  fi
+  # обновить и основной conf на диске
+  cp -f "$dest" "$src" 2>/dev/null || true
+  return 0
+}
+
 do_apply_awg() {
   echo
   info "Применить conf в awg-manager"
@@ -588,6 +764,20 @@ do_apply_awg() {
     return 1
   fi
 
+  mkdir -p "$TMPDIR" 2>/dev/null || true
+
+  # 1) выбор endpoint из list → правка conf
+  if ! awg_pick_endpoint; then
+    return 1
+  fi
+  conf_use="$TMPDIR/warpscout-awg-apply.conf"
+  if ! awg_patch_conf_endpoint "$CONF_OUT" "$conf_use" "$SELECTED_EP"; then
+    error "Не удалось подставить Endpoint = $SELECTED_EP в conf."
+    return 1
+  fi
+  info "В $CONF_OUT: Endpoint = $SELECTED_EP"
+
+  # 2) API
   base=$(awg_api_base)
   info "API: $base"
 
@@ -598,7 +788,6 @@ do_apply_awg() {
   key="$AWG_KEY"
 
   listf="$TMPDIR/awg-tunnels.txt"
-  mkdir -p "$TMPDIR" 2>/dev/null || true
   info "Запрос списка туннелей..."
   if ! awg_list_tunnels "$base" "$key" "$listf"; then
     warn "Список туннелей пуст или недоступен — можно импортировать новый."
@@ -619,7 +808,7 @@ do_apply_awg() {
   printf '  %s%d)%s  Импорт нового туннеля (POST /import/conf)\n' "$BOLD" "$new_idx" "$NC"
   echo "  0) Отмена"
   echo
-  printf '  %sВыбор:%s ' "$BOLD" "$NC"
+  printf '  %sВыбор туннеля:%s ' "$BOLD" "$NC"
   sel=$(read_choice)
   echo
 
@@ -629,10 +818,11 @@ do_apply_awg() {
 
   # импорт нового
   if [ "$sel" = "$new_idx" ]; then
-    printf '%s' "${YELLOW}[?]${NC} Имя нового туннеля [WARP-warpscout]: "
+    def_name="WARP-${SELECTED_NODE}"
+    printf '%s' "${YELLOW}[?]${NC} Имя нового туннеля [${def_name}]: "
     tname=$(read_choice)
     echo
-    [ -n "$tname" ] || tname="WARP-warpscout"
+    [ -n "$tname" ] || tname="$def_name"
     printf '%s' "${YELLOW}[?]${NC} Backend (kernel/nativewg) [nativewg]: "
     backend=$(read_choice)
     echo
@@ -641,11 +831,11 @@ do_apply_awg() {
     bodyf="$TMPDIR/awg-import.json"
     {
       printf '{"content":"'
-      tr -d '\r' < "$CONF_OUT" | sed 's/\\/\\\\/g;s/"/\\"/g;s/\t/\\t/g' | awk '{printf "%s\\n",$0}'
+      tr -d '\r' < "$conf_use" | sed 's/\\/\\\\/g;s/"/\\"/g;s/\t/\\t/g' | awk '{printf "%s\\n",$0}'
       printf '","name":"%s","backend":"%s"}' "$tname" "$backend"
     } > "$bodyf"
 
-    info "POST ${base}/import/conf  name=$tname backend=$backend"
+    info "POST ${base}/import/conf  name=$tname backend=$backend endpoint=$SELECTED_EP"
     resp=$(curl -sS --connect-timeout 5 --max-time 30 \
       -X POST "${base}/import/conf" \
       -H "Authorization: Bearer ${key}" \
@@ -678,7 +868,7 @@ do_apply_awg() {
     return 1
   fi
 
-  if ! confirm_yes "Заменить конфиг туннеля «${tname}» (id=$tid)?"; then
+  if ! confirm_yes "Заменить «${tname}» (id=$tid) → Endpoint ${SELECTED_EP} [${SELECTED_NODE}]?"; then
     info "Отменено."
     return 0
   fi
@@ -686,7 +876,7 @@ do_apply_awg() {
   bodyf="$TMPDIR/awg-replace.json"
   {
     printf '{"content":"'
-    tr -d '\r' < "$CONF_OUT" | sed 's/\\/\\\\/g;s/"/\\"/g;s/\t/\\t/g' | awk '{printf "%s\\n",$0}'
+    tr -d '\r' < "$conf_use" | sed 's/\\/\\\\/g;s/"/\\"/g;s/\t/\\t/g' | awk '{printf "%s\\n",$0}'
     printf '"}'
   } > "$bodyf"
 
@@ -697,7 +887,7 @@ do_apply_awg() {
     -H "Content-Type: application/json" \
     -d @"$bodyf" 2>/dev/null) || resp=""
   if printf '%s' "$resp" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
-    info "Конфиг туннеля $tid заменён."
+    info "Конфиг туннеля $tid заменён (Endpoint = $SELECTED_EP)."
     printf '%s\n' "${DIM}$resp${NC}" | head -c 400
     echo
     return 0
