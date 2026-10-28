@@ -619,6 +619,7 @@ awg_patch_conf_address() {
 # Если IPv4 conf занят другими туннелями (кроме skip_id) — взять свободный 172.16.0.x
 # listf: id|name|status|endpoint|ipv4
 # conf: файл для правки
+# Важно: не использовать имя tid в while — в ash оно затирает переменную вызывающего кода.
 awg_ensure_free_address() {
   conf="$1"
   listf="$2"
@@ -631,16 +632,17 @@ awg_ensure_free_address() {
   fi
 
   conflict=0
+  conflict_id=""
   if [ -s "$listf" ]; then
-    while IFS='|' read -r tid _tname _tstat _tend taddr || [ -n "$tid" ]; do
-      [ -n "$tid" ] || continue
-      [ -n "$taddr" ] || continue
-      if [ -n "$skip_id" ] && [ "$tid" = "$skip_id" ]; then
+    while IFS='|' read -r _aid _aname _astat _aend _aaddr || [ -n "$_aid" ]; do
+      [ -n "$_aid" ] || continue
+      [ -n "$_aaddr" ] || continue
+      if [ -n "$skip_id" ] && [ "$_aid" = "$skip_id" ]; then
         continue
       fi
-      if [ "$taddr" = "$cur" ]; then
+      if [ "$_aaddr" = "$cur" ]; then
         conflict=1
-        warn "Адрес $cur уже у туннеля $tid — ищем свободный."
+        conflict_id="$_aid"
         break
       fi
     done < "$listf"
@@ -650,21 +652,20 @@ awg_ensure_free_address() {
     info "Address $cur свободен (или только у текущего туннеля)."
     return 0
   fi
+  warn "Адрес $cur уже у туннеля ${conflict_id} — ищем свободный."
 
-  # собрать занятые
   usedf="$TMPDIR/used-addr.txt"
   : > "$usedf"
   if [ -s "$listf" ]; then
-    while IFS='|' read -r tid _tname _tstat _tend taddr || [ -n "$tid" ]; do
-      [ -n "$taddr" ] || continue
-      if [ -n "$skip_id" ] && [ "$tid" = "$skip_id" ]; then
+    while IFS='|' read -r _aid _aname _astat _aend _aaddr || [ -n "$_aid" ]; do
+      [ -n "$_aaddr" ] || continue
+      if [ -n "$skip_id" ] && [ "$_aid" = "$skip_id" ]; then
         continue
       fi
-      printf '%s\n' "$taddr" >> "$usedf"
+      printf '%s\n' "$_aaddr" >> "$usedf"
     done < "$listf"
   fi
 
-  # предпочитаем 172.16.0.2 .. 172.16.0.254
   free=""
   n=2
   while [ "$n" -le 254 ]; do
@@ -683,7 +684,6 @@ awg_ensure_free_address() {
 
   if awg_patch_conf_address "$conf" "$free"; then
     info "Address: $cur → $free"
-    # синхронизировать основной conf на диске, если conf — рабочая копия
     if [ "$conf" != "$CONF_OUT" ] && [ -f "$CONF_OUT" ]; then
       awg_patch_conf_address "$CONF_OUT" "$free" 2>/dev/null || true
     fi
@@ -692,6 +692,7 @@ awg_ensure_free_address() {
   error "Не удалось записать Address = $free"
   return 1
 }
+
 
 # Разбор секции «Best endpoint per node» из list → файл: NODE|ENDPOINT|TUN_PING|LOSS|LOCATION
 # Пример строки:
