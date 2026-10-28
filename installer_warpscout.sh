@@ -16,7 +16,7 @@
 #   sh installer_warpscout.sh
 #   curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_warpscout.sh | sh
 
-SCRIPT_VERSION="0.1.6"
+SCRIPT_VERSION="0.1.7"
 
 # ANSI (portable для ash/BusyBox)
 RED=$(printf '\033[0;31m')
@@ -875,6 +875,31 @@ awg_patch_conf_endpoint() {
   return 0
 }
 
+
+# Старт/рестарт туннеля через API (после replace, если был stopped — API сам не поднимает)
+awg_control() {
+  # awg_control start|stop|restart ID
+  action="$1"
+  tid="$2"
+  key="$3"
+  base="$4"
+  [ -n "$tid" ] || return 1
+  resp=$(curl -sS --connect-timeout 5 --max-time 30 \
+    -X POST "${base}/control/${action}?id=${tid}" \
+    -H "Authorization: Bearer ${key}" \
+    -H "Content-Type: application/json" \
+    -d '{}' 2>/dev/null) || resp=""
+  if printf '%s' "$resp" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
+    info "control/${action} id=${tid}: OK"
+    return 0
+  fi
+  err=$(printf '%s' "$resp" | sed -n 's/.*"error"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+  [ -z "$err" ] && err=$(printf '%s' "$resp" | sed -n 's/.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+  warn "control/${action} id=${tid}: ${err:-fail}"
+  [ -n "$resp" ] && printf '%s\n' "${DIM}$resp${NC}" | head -c 300 && echo
+  return 1
+}
+
 do_apply_awg() {
   echo
   info "Применить conf в awg-manager"
@@ -1028,6 +1053,15 @@ do_apply_awg() {
     info "Конфиг туннеля $tid заменён (Endpoint = $SELECTED_EP)."
     printf '%s\n' "${DIM}$resp${NC}" | head -c 400
     echo
+    # API replace поднимает туннель только если он БЫЛ running.
+    # Если был stopped — конфиг записан, но start не вызывается → делаем сами.
+    info "Запуск туннеля $tid..."
+    if awg_control start "$tid" "$key" "$base"; then
+      :
+    else
+      warn "start не удался — пробуем restart..."
+      awg_control restart "$tid" "$key" "$base" || true
+    fi
     return 0
   fi
   error "replace не удался."
