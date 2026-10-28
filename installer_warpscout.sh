@@ -16,7 +16,7 @@
 #   sh installer_warpscout.sh
 #   curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_warpscout.sh | sh
 
-SCRIPT_VERSION="0.1.7"
+SCRIPT_VERSION="0.1.9"
 
 # ANSI (portable для ash/BusyBox)
 RED=$(printf '\033[0;31m')
@@ -1026,15 +1026,20 @@ do_apply_awg() {
     return 1
   fi
 
-  # replace: конфликт Address с другими туннелями (не с tid)
+  # Замена конфига без delete (маршрутизация/привязки туннеля сохраняются).
+  # API: stop (если running) → запись conf → start только если был running.
+  # Поэтому после replace всегда явно start/restart.
   if ! awg_ensure_free_address "$conf_use" "$listf" "$tid"; then
     return 1
   fi
 
-  if ! confirm_yes "Заменить «${tname}» (id=$tid) → Endpoint ${SELECTED_EP} [${SELECTED_NODE}]?"; then
+  if ! confirm_yes "Заменить conf «${tname}» (id=$tid) → Endpoint ${SELECTED_EP} [${SELECTED_NODE}]?"; then
     info "Отменено."
     return 0
   fi
+
+  info "Остановка $tid (перед replace)..."
+  awg_control stop "$tid" "$key" "$base" || true
 
   bodyf="$TMPDIR/awg-replace.json"
   {
@@ -1049,24 +1054,23 @@ do_apply_awg() {
     -H "Authorization: Bearer ${key}" \
     -H "Content-Type: application/json" \
     -d @"$bodyf" 2>/dev/null) || resp=""
-  if printf '%s' "$resp" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
-    info "Конфиг туннеля $tid заменён (Endpoint = $SELECTED_EP)."
-    printf '%s\n' "${DIM}$resp${NC}" | head -c 400
-    echo
-    # API replace поднимает туннель только если он БЫЛ running.
-    # Если был stopped — конфиг записан, но start не вызывается → делаем сами.
-    info "Запуск туннеля $tid..."
-    if awg_control start "$tid" "$key" "$base"; then
-      :
-    else
-      warn "start не удался — пробуем restart..."
-      awg_control restart "$tid" "$key" "$base" || true
-    fi
-    return 0
+  if ! printf '%s' "$resp" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
+    error "replace не удался."
+    [ -n "$resp" ] && printf '%s\n' "$resp"
+    return 1
   fi
-  error "replace не удался."
-  [ -n "$resp" ] && printf '%s\n' "$resp"
-  return 1
+  info "Конфиг туннеля $tid заменён (Endpoint = $SELECTED_EP)."
+  printf '%s\n' "${DIM}$resp${NC}" | head -c 400
+  echo
+
+  # После replace (особенно если туннель был stopped) API может не поднять его.
+  sleep 1
+  info "Запуск $tid..."
+  if ! awg_control start "$tid" "$key" "$base"; then
+    warn "start не удался — restart..."
+    awg_control restart "$tid" "$key" "$base" || true
+  fi
+  return 0
 }
 
 # ---------------------------------------------------------------------------
