@@ -483,42 +483,36 @@ awg_api_base() {
   printf 'http://127.0.0.1:%s/api' "$(awg_port)"
 }
 
-# Достаём API-ключ: settings.json → .api_key → ввод пользователя
-awg_get_api_key() {
-  key=""
+# Достаём API-ключ в AWG_KEY (глобально).
+# Промпты только в stderr — иначе key=$(...) глотает вывод и «зависает».
+awg_load_api_key() {
+  AWG_KEY=""
   if [ -f "$AWG_SETTINGS" ]; then
-    # возможные имена полей
     for field in apiKey api_key ApiKey APIKey; do
-      key=$(sed -n "s/.*\"${field}\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" "$AWG_SETTINGS" 2>/dev/null | head -1)
-      [ -n "$key" ] && break
+      AWG_KEY=$(sed -n "s/.*\"${field}\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" "$AWG_SETTINGS" 2>/dev/null | head -1)
+      [ -n "$AWG_KEY" ] && break
     done
   fi
-  if [ -z "$key" ] && [ -f "$AWG_API_KEY_FILE" ]; then
-    key=$(tr -d '\r\n' < "$AWG_API_KEY_FILE" 2>/dev/null)
+  if [ -z "$AWG_KEY" ] && [ -f "$AWG_API_KEY_FILE" ]; then
+    AWG_KEY=$(tr -d '\r\n' < "$AWG_API_KEY_FILE" 2>/dev/null)
   fi
-  if [ -z "$key" ]; then
-    printf '%s\n' "${YELLOW}[?]${NC} API-ключ awg-manager (Настройки → Расширенные → API Key):"
-    printf '    '
-    key=$(read_choice)
-    echo
-    if [ -n "$key" ]; then
+  if [ -z "$AWG_KEY" ]; then
+    printf '%s\n' "${YELLOW}[?]${NC} API-ключ awg-manager (Настройки → Расширенные → API Key):" >&2
+    printf '    ' >&2
+    AWG_KEY=$(read_choice)
+    printf '\n' >&2
+    if [ -n "$AWG_KEY" ]; then
       mkdir -p /opt/etc/awg-manager 2>/dev/null || true
-      printf '%s\n' "$key" > "$AWG_API_KEY_FILE" 2>/dev/null || true
+      printf '%s\n' "$AWG_KEY" > "$AWG_API_KEY_FILE" 2>/dev/null || true
       chmod 600 "$AWG_API_KEY_FILE" 2>/dev/null || true
+      info "Ключ сохранён в $AWG_API_KEY_FILE" >&2
     fi
   fi
-  printf '%s\n' "$key"
+  [ -n "$AWG_KEY" ]
 }
 
-# JSON-экранирование содержимого .conf для API
-awg_json_escape_conf() {
-  conf="$1"
-  [ -f "$conf" ] || return 1
-  # content как одна JSON-строка с \n
-  { printf '{"content":"'; tr -d '\r' < "$conf" | sed 's/\\/\\\\/g;s/"/\\"/g;s/\t/\\t/g' | awk '{printf "%s\\n",$0}'; printf '"}'; }
-}
-
-# Список туннелей → файл: id|name|status|endpoint (по одной строке)
+# Список туннелей → файл: id|name|status|endpoint
+# Ответ: {"success":true,"data":[{...},...]}
 awg_list_tunnels() {
   base="$1"
   key="$2"
@@ -528,11 +522,14 @@ awg_list_tunnels() {
     error "Нужен curl для API awg-manager."
     return 1
   fi
-  resp=$(curl -fsS --connect-timeout 5 --max-time 15 \
+
+  # -sS: без прогресса; жёсткие таймауты; без -f (чтобы увидеть тело при 401)
+  resp=$(curl -sS --connect-timeout 3 --max-time 10 \
     -H "Authorization: Bearer ${key}" \
     "${base}/tunnels/list" 2>/dev/null) || resp=""
+
   if [ -z "$resp" ]; then
-    error "Не удалось получить список туннелей (${base}/tunnels/list)."
+    error "Пустой ответ от ${base}/tunnels/list"
     error "Проверьте, что awg-manager запущен и API-ключ верный."
     return 1
   fi
@@ -543,19 +540,34 @@ awg_list_tunnels() {
       return 1
       ;;
   esac
-  # Разбиваем объекты по "id":
-  printf '%s' "$resp" | tr '{' '\n' | while IFS= read -r chunk || [ -n "$chunk" ]; do
+
+  # Без pipe→while (subshell): пишем через временный файл кусков
+  tmpc="$out.chunks"
+  # Разделитель объектов: каждая «{» — новый фрагмент
+  printf '%s' "$resp" | tr '{' '\n' > "$tmpc" 2>/dev/null || true
+  : > "$out"
+  while IFS= read -r chunk || [ -n "$chunk" ]; do
     case "$chunk" in
       *'"id"'*)
         tid=$(printf '%s' "$chunk" | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+        # пропускаем служебные вложенные объекты без id туннеля вида awg*
         [ -n "$tid" ] || continue
+        case "$tid" in
+          awg*|wg*|tun*|id-*) ;;
+          *)
+            # всё равно принимаем любые id из data[]
+            ;;
+        esac
         tname=$(printf '%s' "$chunk" | sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
         tstat=$(printf '%s' "$chunk" | sed -n 's/.*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
         tend=$(printf '%s' "$chunk" | sed -n 's/.*"endpoint"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
-        printf '%s|%s|%s|%s\n' "$tid" "${tname:-?}" "${tstat:-?}" "${tend:-}"
+        # отсекаем куски без status (вложенные pingCheck и т.п.)
+        [ -n "$tstat" ] || continue
+        printf '%s|%s|%s|%s\n' "$tid" "${tname:-?}" "${tstat:-?}" "${tend:-}" >> "$out"
         ;;
     esac
-  done > "$out"
+  done < "$tmpc"
+  rm -f "$tmpc" 2>/dev/null || true
   [ -s "$out" ]
 }
 
@@ -578,14 +590,16 @@ do_apply_awg() {
 
   base=$(awg_api_base)
   info "API: $base"
-  key=$(awg_get_api_key)
-  if [ -z "$key" ]; then
+
+  if ! awg_load_api_key; then
     error "API-ключ не задан."
     return 1
   fi
+  key="$AWG_KEY"
 
   listf="$TMPDIR/awg-tunnels.txt"
   mkdir -p "$TMPDIR" 2>/dev/null || true
+  info "Запрос списка туннелей..."
   if ! awg_list_tunnels "$base" "$key" "$listf"; then
     warn "Список туннелей пуст или недоступен — можно импортировать новый."
   fi
@@ -619,13 +633,12 @@ do_apply_awg() {
     tname=$(read_choice)
     echo
     [ -n "$tname" ] || tname="WARP-warpscout"
-    printf '%s' "${YELLOW}[?]${NC} Backend (kernel/nativewg) [kernel]: "
+    printf '%s' "${YELLOW}[?]${NC} Backend (kernel/nativewg) [nativewg]: "
     backend=$(read_choice)
     echo
-    [ -n "$backend" ] || backend="kernel"
+    [ -n "$backend" ] || backend="nativewg"
 
     bodyf="$TMPDIR/awg-import.json"
-    # {"content":"...","name":"...","backend":"..."}
     {
       printf '{"content":"'
       tr -d '\r' < "$CONF_OUT" | sed 's/\\/\\\\/g;s/"/\\"/g;s/\t/\\t/g' | awk '{printf "%s\\n",$0}'
@@ -633,7 +646,7 @@ do_apply_awg() {
     } > "$bodyf"
 
     info "POST ${base}/import/conf  name=$tname backend=$backend"
-    resp=$(curl -fsS --connect-timeout 5 --max-time 30 \
+    resp=$(curl -sS --connect-timeout 5 --max-time 30 \
       -X POST "${base}/import/conf" \
       -H "Authorization: Bearer ${key}" \
       -H "Content-Type: application/json" \
@@ -678,7 +691,7 @@ do_apply_awg() {
   } > "$bodyf"
 
   info "POST ${base}/tunnels/replace?id=${tid}"
-  resp=$(curl -fsS --connect-timeout 5 --max-time 30 \
+  resp=$(curl -sS --connect-timeout 5 --max-time 30 \
     -X POST "${base}/tunnels/replace?id=${tid}" \
     -H "Authorization: Bearer ${key}" \
     -H "Content-Type: application/json" \
