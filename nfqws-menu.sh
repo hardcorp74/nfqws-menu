@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.10.19"
+SCRIPT_VERSION="0.10.21"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -4383,6 +4383,16 @@ menu_firc() {
   refresh_opkg_cache 2>/dev/null || true
 }
 
+# 18. warpscout — поиск эндпоинтов Cloudflare WARP (AmneziaWG)
+WARPSCOUT_INSTALL_URL="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_warpscout.sh"
+
+menu_warpscout() {
+  if ! run_menu_remote_sh "18" "warpscout" "$WARPSCOUT_INSTALL_URL" 2000; then
+    error "Установщик warpscout завершился с ошибкой."
+    return 1
+  fi
+}
+
 menu_magitrickle() {
   echo
   info "MagiTrickle"
@@ -6797,6 +6807,7 @@ main_menu() {
     echo "      15. telemt / telemt-panel"
     echo "      16. TG WS Proxy Rust"
     echo "      17. firc"
+    echo "      18. warpscout"
     echo
     printf '%s\n' "${CYAN}${BOLD}[::]  ${LBL_REMOVE} [${GREEN}S${CYAN}${BOLD}]  |  ${LBL_LANG} [${GREEN}77${CYAN}${BOLD}]${NC}"
     echo "      88. $LBL_88"
@@ -6831,6 +6842,7 @@ main_menu() {
       15) menu_telemt || true ;;
       16) menu_tg_ws_proxy_rs || true ;;
       17) menu_firc || true ;;
+      18) menu_warpscout || true ;;
       S|s) menu_service || true ;;
       U|u) opkg_upgrade_all || true ;;
       o|O) menu_opera_hidden || true ;;

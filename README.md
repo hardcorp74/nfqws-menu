@@ -4,7 +4,7 @@
 
 Репозиторий также служит хранилищем готовых **стратегий** обхода DPI, **blobs** и **lists**.
 
-- Скрипт: `nfqws-menu.sh` (текущая версия **0.10.19**)
+- Скрипт: `nfqws-menu.sh` (текущая версия **0.10.21**)
 - Стратегии: `strategies/`
 - Hosts: `hosts`
 - Контрольные суммы: `SHA256SUMS`, `strategies/blobs/SHA256SUMS`
@@ -107,6 +107,7 @@ menu
       15. telemt / telemt-panel
       16. TG WS Proxy Rust
       17. firc
+      18. warpscout
 
 [::]  СЕРВИС [S]  |  Language: RU|EN [77]
       88. Удаление пакетов
@@ -441,6 +442,23 @@ curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_
 - Целевая платформа: **KeeneticOS 4+/5+** (ядро вроде `4.9-ndm-5`), aarch64 / mipsel / mips
 - Статус в блоке установленных компонентов; удаление — здесь или в п. 88
 
+### 18. warpscout
+
+[warpscout](https://github.com/vernette/warpscout) — поиск рабочих эндпоинтов **Cloudflare WARP** (нода, регион выхода, ping/loss). Полезно, когда часть нод (например `DME`) режется DPI.
+
+Через `installer_warpscout.sh` (пункт меню **18** или напрямую):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_warpscout.sh | sh
+```
+
+1. **Установка / обновление** — бинарник в `/opt/bin/warpscout`  
+   - **aarch64**: релиз `warpscout_*_linux_arm64.tar.gz` (v0.16.1)  
+   - **mipsel**: готовый бинарник из `warpscout/warpscout-0.16.1-mipsle` в этом репозитории
+2. **Создать аккаунт** — `warpscout register` → `/opt/root/warpscout-account.json`
+3. **Сканирование (AWG)** — `warpscout scan -p awg -P -o /opt/root/warpscout-awg.list`
+4. **Удаление** — бинарник; по подтверждению аккаунт и list
+
 ### 77. Change language
 
 Мгновенное переключение интерфейса **ru ↔ en** (файл `/opt/etc/nfqws-menu/nfqws-menu.lang`). При первом запуске файл по старому пути `/opt/etc/nfqws-menu.lang` переносится в новый каталог.
@@ -477,6 +495,10 @@ curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_
 ---
 
 ## Changelog
+
+### 0.10.21
+
+- **п. 18 warpscout** — `installer_warpscout.sh`: установка bin (aarch64 из releases, mipsel из `warpscout/`), `register`, scan AWG → `/opt/root/warpscout-awg.list`
 
 ### 0.10.16
 
