@@ -16,7 +16,7 @@
 #   sh installer_warpscout.sh
 #   curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_warpscout.sh | sh
 
-SCRIPT_VERSION="0.1.9"
+SCRIPT_VERSION="0.1.10"
 
 # ANSI (portable для ash/BusyBox)
 RED=$(printf '\033[0;31m')
@@ -1003,6 +1003,17 @@ do_apply_awg() {
       info "Импорт успешен."
       printf '%s\n' "${DIM}$resp${NC}" | head -c 400
       echo
+      new_id=$(printf '%s' "$resp" | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+      if [ -n "$new_id" ]; then
+        sleep 1
+        info "Запуск $new_id..."
+        if ! awg_control start "$new_id" "$key" "$base"; then
+          warn "start не удался — restart..."
+          awg_control restart "$new_id" "$key" "$base" || true
+        fi
+      else
+        warn "id нового туннеля не найден в ответе — запустите вручную."
+      fi
       return 0
     fi
     error "Импорт не удался."
