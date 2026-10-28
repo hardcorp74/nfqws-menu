@@ -5,7 +5,8 @@
 #
 # 1) Установка / обновление warpscout
 # 2) Создать аккаунт (warpscout register)
-# 3) Сканирование адресов (AWG → /opt/root/warpscout-awg.list)
+# 3) Сканирование адресов (AWG → list + conf)
+# 4) Применить conf в awg-manager (если установлен)
 # 88) Удаление
 #
 # Запуск:
@@ -29,11 +30,14 @@ error() { printf '%s\n' "${RED}[!]${NC} $*"; }
 BIN="/opt/bin/warpscout"
 ACCOUNT_FILE="/opt/root/warpscout-account.json"
 SCAN_OUT="/opt/root/warpscout-awg.list"
+CONF_OUT="/opt/root/warpscout-awg.conf"
 GITHUB_REPO="vernette/warpscout"
 # фиксированная версия с готовым mipsel-бинарником в этом репозитории
 PIN_VERSION="0.16.1"
 ARM64_URL="https://github.com/vernette/warpscout/releases/download/v${PIN_VERSION}/warpscout_${PIN_VERSION}_linux_arm64.tar.gz"
 MIPSEL_URL="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/warpscout/warpscout-${PIN_VERSION}-mipsle"
+AWG_SETTINGS="/opt/etc/awg-manager/settings.json"
+AWG_API_KEY_FILE="/opt/etc/awg-manager/.api_key"
 TMPDIR="/tmp/warpscout-installer-$$"
 trap 'rm -rf "$TMPDIR" 2>/dev/null' EXIT INT TERM
 
@@ -253,6 +257,17 @@ has_account() {
   [ -f "$ACCOUNT_FILE" ] && [ -s "$ACCOUNT_FILE" ]
 }
 
+has_conf() {
+  [ -f "$CONF_OUT" ] && [ -s "$CONF_OUT" ]
+}
+
+is_awg_manager_installed() {
+  if opkg list-installed 2>/dev/null | grep -q '^awg-manager '; then
+    return 0
+  fi
+  [ -d /opt/etc/awg-manager ]
+}
+
 show_status() {
   st=""
   if is_installed; then
@@ -267,6 +282,12 @@ show_status() {
   if [ -f "$SCAN_OUT" ] && [ -s "$SCAN_OUT" ]; then
     n=$(wc -l < "$SCAN_OUT" 2>/dev/null | tr -d ' ')
     st="${st:+$st, }list ${n:-?} строк"
+  fi
+  if has_conf; then
+    st="${st:+$st, }conf ✓"
+  fi
+  if is_awg_manager_installed; then
+    st="${st:+$st, }awg-manager ✓"
   fi
   if [ -n "$st" ]; then
     info "Обнаружено: $st"
@@ -293,7 +314,6 @@ do_install() {
         error "Не удалось скачать архив."
         return 1
       fi
-      # минимальный размер (бинарник ~ несколько МБ)
       sz=$(wc -c < "$archive" 2>/dev/null | tr -d ' ')
       case "$sz" in ''|*[!0-9]*) sz=0 ;; esac
       if [ "$sz" -lt 100000 ]; then
@@ -374,7 +394,6 @@ do_register() {
     rm -f "$ACCOUNT_FILE" 2>/dev/null || true
   fi
 
-  # warpscout по умолчанию пишет warpscout-account.json рядом с CWD
   cd /opt/root || cd /tmp || true
   if ! "$BIN" register; then
     error "register завершился с ошибкой."
@@ -382,7 +401,6 @@ do_register() {
     return 1
   fi
 
-  # перенос, если создался не в /opt/root
   if [ ! -f "$ACCOUNT_FILE" ]; then
     for cand in \
       ./warpscout-account.json \
@@ -405,7 +423,7 @@ do_register() {
 }
 
 # ---------------------------------------------------------------------------
-# 3) Сканирование AWG
+# 3) Сканирование AWG (+ готовый conf)
 # ---------------------------------------------------------------------------
 do_scan() {
   echo
@@ -420,26 +438,260 @@ do_scan() {
   fi
 
   mkdir -p /opt/root 2>/dev/null || true
-
-  # account рядом с CWD — переходим в /opt/root
   cd /opt/root || true
 
-  info "Команда: warpscout scan -p awg -P -o $SCAN_OUT"
+  info "Команда: warpscout scan -p awg -P -o $SCAN_OUT -conf $CONF_OUT"
   info "Это может занять несколько минут..."
   echo
 
-  if ! "$BIN" scan -p awg -P -o "$SCAN_OUT"; then
+  if ! "$BIN" scan -p awg -P -o "$SCAN_OUT" -conf "$CONF_OUT"; then
     error "scan завершился с ошибкой."
     return 1
   fi
 
   if [ -f "$SCAN_OUT" ] && [ -s "$SCAN_OUT" ]; then
     n=$(wc -l < "$SCAN_OUT" 2>/dev/null | tr -d ' ')
-    info "Готово: $SCAN_OUT (${n:-?} строк)"
+    info "Отчёт: $SCAN_OUT (${n:-?} строк)"
   else
     warn "Файл отчёта пуст или не создан: $SCAN_OUT"
   fi
+
+  if has_conf; then
+    info "Конфиг лучшего эндпоинта: $CONF_OUT"
+    printf '%s\n' "${DIM}--- начало conf ---${NC}"
+    head -n 40 "$CONF_OUT" 2>/dev/null || true
+    printf '%s\n' "${DIM}--- конец (первые 40 строк) ---${NC}"
+  else
+    warn "Конфиг не создан: $CONF_OUT"
+  fi
   return 0
+}
+
+# ---------------------------------------------------------------------------
+# 4) Применить conf в awg-manager
+# ---------------------------------------------------------------------------
+awg_port() {
+  p=""
+  if [ -f "$AWG_SETTINGS" ]; then
+    p=$(sed -n 's/.*"port"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$AWG_SETTINGS" 2>/dev/null | head -1)
+  fi
+  [ -n "$p" ] || p=2222
+  printf '%s\n' "$p"
+}
+
+awg_api_base() {
+  printf 'http://127.0.0.1:%s/api' "$(awg_port)"
+}
+
+# Достаём API-ключ: settings.json → .api_key → ввод пользователя
+awg_get_api_key() {
+  key=""
+  if [ -f "$AWG_SETTINGS" ]; then
+    # возможные имена полей
+    for field in apiKey api_key ApiKey APIKey; do
+      key=$(sed -n "s/.*\"${field}\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" "$AWG_SETTINGS" 2>/dev/null | head -1)
+      [ -n "$key" ] && break
+    done
+  fi
+  if [ -z "$key" ] && [ -f "$AWG_API_KEY_FILE" ]; then
+    key=$(tr -d '\r\n' < "$AWG_API_KEY_FILE" 2>/dev/null)
+  fi
+  if [ -z "$key" ]; then
+    printf '%s\n' "${YELLOW}[?]${NC} API-ключ awg-manager (Настройки → Расширенные → API Key):"
+    printf '    '
+    key=$(read_choice)
+    echo
+    if [ -n "$key" ]; then
+      mkdir -p /opt/etc/awg-manager 2>/dev/null || true
+      printf '%s\n' "$key" > "$AWG_API_KEY_FILE" 2>/dev/null || true
+      chmod 600 "$AWG_API_KEY_FILE" 2>/dev/null || true
+    fi
+  fi
+  printf '%s\n' "$key"
+}
+
+# JSON-экранирование содержимого .conf для API
+awg_json_escape_conf() {
+  conf="$1"
+  [ -f "$conf" ] || return 1
+  # content как одна JSON-строка с \n
+  { printf '{"content":"'; tr -d '\r' < "$conf" | sed 's/\\/\\\\/g;s/"/\\"/g;s/\t/\\t/g' | awk '{printf "%s\\n",$0}'; printf '"}'; }
+}
+
+# Список туннелей → файл: id|name|status|endpoint (по одной строке)
+awg_list_tunnels() {
+  base="$1"
+  key="$2"
+  out="$3"
+  : > "$out"
+  if ! command -v curl >/dev/null 2>&1; then
+    error "Нужен curl для API awg-manager."
+    return 1
+  fi
+  resp=$(curl -fsS --connect-timeout 5 --max-time 15 \
+    -H "Authorization: Bearer ${key}" \
+    "${base}/tunnels/list" 2>/dev/null) || resp=""
+  if [ -z "$resp" ]; then
+    error "Не удалось получить список туннелей (${base}/tunnels/list)."
+    error "Проверьте, что awg-manager запущен и API-ключ верный."
+    return 1
+  fi
+  case "$resp" in
+    *'"success":false'*|*'"success": false'*)
+      err=$(printf '%s' "$resp" | sed -n 's/.*"error"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+      error "API: ${err:-ошибка}"
+      return 1
+      ;;
+  esac
+  # Разбиваем объекты по "id":
+  printf '%s' "$resp" | tr '{' '\n' | while IFS= read -r chunk || [ -n "$chunk" ]; do
+    case "$chunk" in
+      *'"id"'*)
+        tid=$(printf '%s' "$chunk" | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+        [ -n "$tid" ] || continue
+        tname=$(printf '%s' "$chunk" | sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+        tstat=$(printf '%s' "$chunk" | sed -n 's/.*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+        tend=$(printf '%s' "$chunk" | sed -n 's/.*"endpoint"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+        printf '%s|%s|%s|%s\n' "$tid" "${tname:-?}" "${tstat:-?}" "${tend:-}"
+        ;;
+    esac
+  done > "$out"
+  [ -s "$out" ]
+}
+
+do_apply_awg() {
+  echo
+  info "Применить conf в awg-manager"
+  if ! is_awg_manager_installed; then
+    error "awg-manager не установлен (opkg / /opt/etc/awg-manager)."
+    return 1
+  fi
+  if ! has_conf; then
+    error "Нет конфига: $CONF_OUT"
+    error "Сначала выполните пункт 3 (сканирование)."
+    return 1
+  fi
+  if ! command -v curl >/dev/null 2>&1; then
+    error "Нужен curl."
+    return 1
+  fi
+
+  base=$(awg_api_base)
+  info "API: $base"
+  key=$(awg_get_api_key)
+  if [ -z "$key" ]; then
+    error "API-ключ не задан."
+    return 1
+  fi
+
+  listf="$TMPDIR/awg-tunnels.txt"
+  mkdir -p "$TMPDIR" 2>/dev/null || true
+  if ! awg_list_tunnels "$base" "$key" "$listf"; then
+    warn "Список туннелей пуст или недоступен — можно импортировать новый."
+  fi
+
+  echo
+  printf '%s\n' "${BOLD}Туннели awg-manager:${NC}"
+  i=0
+  if [ -s "$listf" ]; then
+    while IFS='|' read -r tid tname tstat tend || [ -n "$tid" ]; do
+      [ -n "$tid" ] || continue
+      i=$((i + 1))
+      printf '  %s%d)%s  %s  %s[%s]%s  %s\n' \
+        "$BOLD" "$i" "$NC" "$tid" "$DIM" "$tstat" "$NC" "${tname}${tend:+ · $tend}"
+    done < "$listf"
+  fi
+  new_idx=$((i + 1))
+  printf '  %s%d)%s  Импорт нового туннеля (POST /import/conf)\n' "$BOLD" "$new_idx" "$NC"
+  echo "  0) Отмена"
+  echo
+  printf '  %sВыбор:%s ' "$BOLD" "$NC"
+  sel=$(read_choice)
+  echo
+
+  case "$sel" in
+    0|"") info "Отменено."; return 0 ;;
+  esac
+
+  # импорт нового
+  if [ "$sel" = "$new_idx" ]; then
+    printf '%s' "${YELLOW}[?]${NC} Имя нового туннеля [WARP-warpscout]: "
+    tname=$(read_choice)
+    echo
+    [ -n "$tname" ] || tname="WARP-warpscout"
+    printf '%s' "${YELLOW}[?]${NC} Backend (kernel/nativewg) [kernel]: "
+    backend=$(read_choice)
+    echo
+    [ -n "$backend" ] || backend="kernel"
+
+    bodyf="$TMPDIR/awg-import.json"
+    # {"content":"...","name":"...","backend":"..."}
+    {
+      printf '{"content":"'
+      tr -d '\r' < "$CONF_OUT" | sed 's/\\/\\\\/g;s/"/\\"/g;s/\t/\\t/g' | awk '{printf "%s\\n",$0}'
+      printf '","name":"%s","backend":"%s"}' "$tname" "$backend"
+    } > "$bodyf"
+
+    info "POST ${base}/import/conf  name=$tname backend=$backend"
+    resp=$(curl -fsS --connect-timeout 5 --max-time 30 \
+      -X POST "${base}/import/conf" \
+      -H "Authorization: Bearer ${key}" \
+      -H "Content-Type: application/json" \
+      -d @"$bodyf" 2>/dev/null) || resp=""
+    if printf '%s' "$resp" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
+      info "Импорт успешен."
+      printf '%s\n' "${DIM}$resp${NC}" | head -c 400
+      echo
+      return 0
+    fi
+    error "Импорт не удался."
+    [ -n "$resp" ] && printf '%s\n' "$resp"
+    return 1
+  fi
+
+  # выбор по номеру
+  case "$sel" in
+    *[!0-9]*) warn "Неверный выбор."; return 1 ;;
+  esac
+  if [ "$sel" -lt 1 ] || [ "$sel" -gt "$i" ]; then
+    warn "Неверный номер."
+    return 1
+  fi
+
+  tid=$(sed -n "${sel}p" "$listf" | cut -d'|' -f1)
+  tname=$(sed -n "${sel}p" "$listf" | cut -d'|' -f2)
+  if [ -z "$tid" ]; then
+    error "Не удалось определить id туннеля."
+    return 1
+  fi
+
+  if ! confirm_yes "Заменить конфиг туннеля «${tname}» (id=$tid)?"; then
+    info "Отменено."
+    return 0
+  fi
+
+  bodyf="$TMPDIR/awg-replace.json"
+  {
+    printf '{"content":"'
+    tr -d '\r' < "$CONF_OUT" | sed 's/\\/\\\\/g;s/"/\\"/g;s/\t/\\t/g' | awk '{printf "%s\\n",$0}'
+    printf '"}'
+  } > "$bodyf"
+
+  info "POST ${base}/tunnels/replace?id=${tid}"
+  resp=$(curl -fsS --connect-timeout 5 --max-time 30 \
+    -X POST "${base}/tunnels/replace?id=${tid}" \
+    -H "Authorization: Bearer ${key}" \
+    -H "Content-Type: application/json" \
+    -d @"$bodyf" 2>/dev/null) || resp=""
+  if printf '%s' "$resp" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
+    info "Конфиг туннеля $tid заменён."
+    printf '%s\n' "${DIM}$resp${NC}" | head -c 400
+    echo
+    return 0
+  fi
+  error "replace не удался."
+  [ -n "$resp" ] && printf '%s\n' "$resp"
+  return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -448,7 +700,7 @@ do_scan() {
 do_remove() {
   echo
   info "Удаление warpscout"
-  if ! is_installed && [ ! -f "$ACCOUNT_FILE" ] && [ ! -f "$SCAN_OUT" ]; then
+  if ! is_installed && [ ! -f "$ACCOUNT_FILE" ] && [ ! -f "$SCAN_OUT" ] && [ ! -f "$CONF_OUT" ]; then
     warn "Ничего не найдено."
     return 0
   fi
@@ -459,8 +711,8 @@ do_remove() {
   fi
 
   remove_data=0
-  if [ -f "$ACCOUNT_FILE" ] || [ -f "$SCAN_OUT" ]; then
-    confirm_yes "Также удалить аккаунт и список ($ACCOUNT_FILE, $SCAN_OUT)?" && remove_data=1
+  if [ -f "$ACCOUNT_FILE" ] || [ -f "$SCAN_OUT" ] || [ -f "$CONF_OUT" ]; then
+    confirm_yes "Также удалить аккаунт, list и conf?" && remove_data=1
   fi
 
   if [ -f "$BIN" ]; then
@@ -471,6 +723,7 @@ do_remove() {
   if [ "$remove_data" = "1" ]; then
     [ -f "$ACCOUNT_FILE" ] && rm -f "$ACCOUNT_FILE" && info "  удалён: $ACCOUNT_FILE"
     [ -f "$SCAN_OUT" ] && rm -f "$SCAN_OUT" && info "  удалён: $SCAN_OUT"
+    [ -f "$CONF_OUT" ] && rm -f "$CONF_OUT" && info "  удалён: $CONF_OUT"
   fi
 
   info "Готово."
@@ -496,7 +749,13 @@ main_menu() {
     printf '%s\n' "${DIM}  ──────────────────────────────────────────${NC}"
     echo "  1) Установка / обновление warpscout"
     echo "  2) Создать аккаунт (register)"
-    echo "  3) Сканирование адресов (AWG → list)"
+    echo "  3) Сканирование адресов (AWG → list + conf)"
+    if is_awg_manager_installed; then
+      echo "  4) Применить conf в awg-manager"
+    else
+      printf '  %s4) Применить conf в awg-manager%s  %s(нужен awg-manager)%s\n' \
+        "$DIM" "$NC" "$DIM" "$NC"
+    fi
     printf '%s\n' "${DIM}  ──────────────────────────────────────────${NC}"
     echo "  88) Удаление"
     echo "  0) Выход"
@@ -509,6 +768,14 @@ main_menu() {
       1) do_install; pause ;;
       2) do_register; pause ;;
       3) do_scan; pause ;;
+      4)
+        if is_awg_manager_installed; then
+          do_apply_awg; pause
+        else
+          error "awg-manager не установлен."
+          pause
+        fi
+        ;;
       88) do_remove; pause ;;
       0|"") info "Выход."; exit 0 ;;
       *) warn "Неверный пункт"; pause ;;

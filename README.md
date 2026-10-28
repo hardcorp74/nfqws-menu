@@ -456,8 +456,9 @@ curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_
    - **aarch64**: релиз `warpscout_*_linux_arm64.tar.gz` (v0.16.1)  
    - **mipsel**: готовый бинарник из `warpscout/warpscout-0.16.1-mipsle` в этом репозитории
 2. **Создать аккаунт** — `warpscout register` → `/opt/root/warpscout-account.json`
-3. **Сканирование (AWG)** — `warpscout scan -p awg -P -o /opt/root/warpscout-awg.list`
-4. **Удаление** — бинарник; по подтверждению аккаунт и list
+3. **Сканирование (AWG)** — `warpscout scan -p awg -P -o /opt/root/warpscout-awg.list -conf /opt/root/warpscout-awg.conf` (отчёт + готовый conf лучшего эндпоинта)
+4. **Применить conf в awg-manager** — только если установлен awg-manager: список туннелей API → replace по id или import нового (`Authorization: Bearer` из Настройки → API Key)
+5. **Удаление** — бинарник; по подтверждению аккаунт, list и conf
 
 ### 77. Change language
 
@@ -498,7 +499,7 @@ curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_
 
 ### 0.10.21
 
-- **п. 18 warpscout** — `installer_warpscout.sh`: установка bin (aarch64 из releases, mipsel из `warpscout/`), `register`, scan AWG → `/opt/root/warpscout-awg.list`
+- **п. 18 warpscout** — `installer_warpscout.sh`: установка bin (aarch64 из releases, mipsel из `warpscout/`), `register`, scan AWG → list + `-conf /opt/root/warpscout-awg.conf`, применение conf в awg-manager (API list/replace/import)
 
 ### 0.10.16
 
