@@ -332,6 +332,7 @@ run_download_providers() {
 
             if [ -s "$temp_file" ]; then
                 grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?' "$temp_file" \
+                    | mask_16 \
                     | sort -t . -k 1,1n -k 2,2n -k 3,3n -k 4,4n -u \
                     | merge_cidrs > "$output_file"
 
