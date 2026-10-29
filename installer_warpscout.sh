@@ -9,15 +9,16 @@
 # 1) Установка / обновление warpscout
 # 2) Создать аккаунт (warpscout register)
 # 3) Сканирование адресов (AWG → list + conf)
-# 4) Применить conf в awg-manager (если установлен)
-# 5) Проверка туннеля (curl --interface nwg*/awg*)
+# 4) Автоматический поиск / apply junk (find-junk)
+# 5) Применить conf в awg-manager (если установлен)
+# 6) Проверка туннеля (curl --interface nwg*/awg*)
 # 88) Удаление
 #
 # Запуск:
 #   sh installer_warpscout.sh
 #   curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_warpscout.sh | sh
 
-SCRIPT_VERSION="0.1.15"
+SCRIPT_VERSION="0.1.16"
 
 # ANSI (portable для ash/BusyBox)
 RED=$(printf '\033[0;31m')
@@ -675,7 +676,7 @@ do_apply_junk() {
 }
 
 # ---------------------------------------------------------------------------
-# 6) Автоматический поиск junk (find-junk) + apply к conf/туннелю
+# 4) Автоматический поиск junk (find-junk) + apply к conf/туннелю
 # ---------------------------------------------------------------------------
 do_find_junk() {
   echo
@@ -817,7 +818,7 @@ do_scan() {
 }
 
 # ---------------------------------------------------------------------------
-# 4) Применить conf в awg-manager
+# 5) Применить conf в awg-manager
 # ---------------------------------------------------------------------------
 awg_port() {
   p=""
@@ -1446,7 +1447,7 @@ do_apply_awg() {
 
 
 # ---------------------------------------------------------------------------
-# 5) Проверка туннеля (через интерфейс nwg*/awg*)
+# 6) Проверка туннеля (через интерфейс nwg*/awg*)
 # ---------------------------------------------------------------------------
 lookup_colo() {
   code="$1"
@@ -1736,14 +1737,14 @@ main_menu() {
     echo "  1) Установка / обновление warpscout"
     echo "  2) Создать аккаунт (register)"
     echo "  3) Сканирование адресов (AWG → list + conf)"
+    echo "  4) Автоматический поиск / apply junk (find-junk)"
     if is_awg_manager_installed; then
-      echo "  4) Применить conf в awg-manager"
+      echo "  5) Применить conf в awg-manager"
     else
-      printf '  %s4) Применить conf в awg-manager%s  %s(нужен awg-manager)%s\n' \
+      printf '  %s5) Применить conf в awg-manager%s  %s(нужен awg-manager)%s\n' \
         "$DIM" "$NC" "$DIM" "$NC"
     fi
-    echo "  5) Проверка туннеля"
-    echo "  6) Автоматический поиск / apply junk (find-junk)"
+    echo "  6) Проверка туннеля"
     printf '%s\n' "${DIM}  ──────────────────────────────────────────${NC}"
     echo "  88) Удаление"
     echo "  0) Выход"
@@ -1756,7 +1757,8 @@ main_menu() {
       1) do_install; pause ;;
       2) do_register; pause ;;
       3) do_scan; pause ;;
-      4)
+      4) do_find_junk; pause ;;
+      5)
         if is_awg_manager_installed; then
           do_apply_awg; pause
         else
@@ -1764,8 +1766,7 @@ main_menu() {
           pause
         fi
         ;;
-      5) do_check_tunnel; pause ;;
-      6) do_find_junk; pause ;;
+      6) do_check_tunnel; pause ;;
       88) do_remove; pause ;;
       0|"") info "Выход."; exit 0 ;;
       *) warn "Неверный пункт"; pause ;;
