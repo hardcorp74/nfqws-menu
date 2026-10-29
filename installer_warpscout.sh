@@ -18,7 +18,7 @@
 #   sh installer_warpscout.sh
 #   curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_warpscout.sh | sh
 
-SCRIPT_VERSION="0.1.24"
+SCRIPT_VERSION="0.1.25"
 
 # ANSI (portable для ash/BusyBox)
 RED=$(printf '\033[0;31m')
@@ -581,12 +581,12 @@ awg_replace_conf_file() {
   echo
   printf '%s\n' "${BOLD}Туннель для apply junk:${NC}"
   i=0
-  while IFS='|' read -r tid tname tstat tend taddr tifc || [ -n "$tid" ]; do
+  while IFS='|' read -r tid tname tstat tend taddr tifc tndms || [ -n "$tid" ]; do
     [ -n "$tid" ] || continue
     i=$((i + 1))
-    printf '  %s%d)%s  %s  %s[%s]%s  %s\n' \
+    printf '  %s%d)%s  %s  %s[%s]%s  %s%s%s\n' \
       "$BOLD" "$i" "$NC" "$tid" "$DIM" "$tstat" "$NC" \
-      "${tname}${tifc:+ · $tifc}"
+      "$tname" "${tend:+ · $tend}" "${taddr:+ · $taddr}"
   done < "$listf"
   echo "  0) Отмена"
   echo
@@ -602,9 +602,23 @@ awg_replace_conf_file() {
   fi
   tid=$(sed -n "${sel}p" "$listf" | cut -d'|' -f1)
   tname=$(sed -n "${sel}p" "$listf" | cut -d'|' -f2)
+  tend=$(sed -n "${sel}p" "$listf" | cut -d'|' -f4)
   [ -n "$tid" ] || { error "Пустой id."; return 1; }
 
-  # conf после scan/find-junk часто с Address=172.16.0.2 — конфликт с системным WG
+  # Только junk (Jc/Jmin/Jmax/I1): сервер/endpoint туннеля не трогаем
+  if [ -n "$tend" ]; then
+    info "Endpoint туннеля оставляем: $tend"
+    tmp_ep="$TMPDIR/junk-ep.conf"
+    if awg_patch_conf_endpoint "$conf" "$tmp_ep" "$tend"; then
+      mv -f "$tmp_ep" "$conf" 2>/dev/null || cp -f "$tmp_ep" "$conf"
+    else
+      warn "Не удалось зафиксировать Endpoint в conf — продолжаем."
+    fi
+  else
+    warn "Endpoint туннеля неизвестен — в conf может уйти Endpoint из scan."
+  fi
+
+  # Address: текущий у туннеля, смена только при конфликте с другими
   if ! awg_ensure_free_address "$conf" "$listf" "$tid"; then
     return 1
   fi
