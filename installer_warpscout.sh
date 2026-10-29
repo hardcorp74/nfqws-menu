@@ -18,7 +18,7 @@
 #   sh installer_warpscout.sh
 #   curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_warpscout.sh | sh
 
-SCRIPT_VERSION="0.1.22"
+SCRIPT_VERSION="0.1.23"
 
 # ANSI (portable для ash/BusyBox)
 RED=$(printf '\033[0;31m')
@@ -1012,27 +1012,42 @@ awg_ensure_free_address() {
   listf="$2"
   skip_id="${3:-}"
 
-  cur=$(awg_conf_ipv4 "$conf")
-  if [ -z "$cur" ]; then
-    warn "В conf нет Address (IPv4) — пропускаем проверку конфликта."
-    return 0
-  fi
-
   # Исключаем только интерфейсы заменяемого туннеля (не «тот же IP»)
   skip_ndms=""
   skip_ifc=""
+  skip_cur=""
   if [ -n "$skip_id" ] && [ -s "$listf" ]; then
     while IFS='|' read -r _aid _aname _astat _aend _aaddr _aifc _andms || [ -n "$_aid" ]; do
       if [ "$_aid" = "$skip_id" ]; then
+        skip_cur="$_aaddr"
         skip_ndms="$_andms"
         skip_ifc="$_aifc"
-        # interfaceName иногда приходит как "nwg1|Wireguard1"
         case "$skip_ifc" in
           *'|'*) skip_ifc=$(printf '%s' "$skip_ifc" | cut -d'|' -f1) ;;
         esac
         break
       fi
     done < "$listf"
+  fi
+
+  # При replace: сначала берём УЖЕ назначенный адрес туннеля (не из conf scan)
+  if [ -n "$skip_cur" ]; then
+    conf_cur=$(awg_conf_ipv4 "$conf")
+    if [ -n "$conf_cur" ] && [ "$conf_cur" != "$skip_cur" ]; then
+      info "Туннель $skip_id уже с Address $skip_cur — оставляем (в conf было $conf_cur)."
+      awg_patch_conf_address "$conf" "$skip_cur" 2>/dev/null || true
+      if [ "$conf" != "$CONF_OUT" ] && [ -f "$CONF_OUT" ]; then
+        awg_patch_conf_address "$CONF_OUT" "$skip_cur" 2>/dev/null || true
+      fi
+    fi
+    cur="$skip_cur"
+  else
+    cur=$(awg_conf_ipv4 "$conf")
+  fi
+
+  if [ -z "$cur" ]; then
+    warn "В conf нет Address (IPv4) — пропускаем проверку конфликта."
+    return 0
   fi
 
   usedf="$TMPDIR/used-addr.txt"
@@ -1103,7 +1118,7 @@ awg_ensure_free_address() {
   fi
 
   if [ "$conflict" != "1" ]; then
-    info "Address $cur свободен (awg-manager + системные Wireguard)."
+    info "Address $cur оставляем (не занят другими)."
     return 0
   fi
   warn "Адрес $cur занят: ${conflict_src:-?} — ищем свободный."
