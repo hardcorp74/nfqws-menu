@@ -18,7 +18,7 @@
 #   sh installer_warpscout.sh
 #   curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_warpscout.sh | sh
 
-SCRIPT_VERSION="0.1.18"
+SCRIPT_VERSION="0.1.19"
 
 # ANSI (portable для ash/BusyBox)
 RED=$(printf '\033[0;31m')
@@ -1615,17 +1615,23 @@ list_tunnel_ifaces() {
     [ -e "$n" ] || continue
     b=$(basename "$n")
     case "$b" in
-      nwg*|awg*|opkgtun*) _if_list="${_if_list} $b" ;;
+      nwg*|awg*|opkgtun*|Wireguard*|wireguard*) _if_list="${_if_list} $b" ;;
     esac
   done
   if [ -z "$(printf '%s' "$_if_list" | tr -d ' ')" ] && command -v ip >/dev/null 2>&1; then
     for b in $(ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | cut -d@ -f1); do
       case "$b" in
-        nwg*|awg*|opkgtun*) _if_list="${_if_list} $b" ;;
+        nwg*|awg*|opkgtun*|Wireguard*|wireguard*) _if_list="${_if_list} $b" ;;
       esac
     done
   fi
   printf '%s\n' $_if_list | tr ' ' '\n' | grep -v '^$' | sort -u
+}
+
+# Уже есть ifc в iflistf?
+_iflist_has() {
+  # _iflist_has FILE IFC
+  grep -q "^${2}|" "$1" 2>/dev/null
 }
 
 do_check_tunnel() {
@@ -1636,12 +1642,13 @@ do_check_tunnel() {
     return 1
   fi
 
-  # ifc|name|status  (имя из awg-manager, если доступен)
+  # ifc|name|status
   iflistf="$TMPDIR/ifaces.txt"
   mkdir -p "$TMPDIR" 2>/dev/null || true
   : > "$iflistf"
 
-  if is_awg_manager_installed && command -v curl >/dev/null 2>&1; then
+  # 1) awg-manager
+  if is_awg_manager_installed; then
     base=$(awg_api_base)
     if awg_load_api_key 2>/dev/null; then
       listf="$TMPDIR/awg-tunnels-check.txt"
@@ -1654,20 +1661,51 @@ do_check_tunnel() {
     fi
   fi
 
-  # fallback: sysfs без имён
-  if [ ! -s "$iflistf" ]; then
-    list_tunnel_ifaces | while IFS= read -r ifc || [ -n "$ifc" ]; do
-      [ -n "$ifc" ] || continue
-      st="?"
-      if [ -e "/sys/class/net/$ifc/operstate" ]; then
-        st=$(cat "/sys/class/net/$ifc/operstate" 2>/dev/null || echo "?")
-      fi
-      printf '%s|%s|%s\n' "$ifc" "$ifc" "$st"
-    done > "$iflistf"
+  # 2) системные Wireguard* из RCI (могут не быть в awg-manager)
+  rcif="$TMPDIR/rci-wg-check.txt"
+  if rci_wireguard_addrs "$rcif" 2>/dev/null; then
+    # rci_wireguard_addrs пишет name|ipv4 — нужен ещё id интерфейса
+    # пересоберём из RCI с id
+    rci=$(curl -s --connect-timeout 1 --max-time 3 "http://127.0.0.1:79/rci/show/interface" 2>/dev/null) || rci=""
+    if [ -n "$rci" ]; then
+      tmpc="$TMPDIR/rci-chunks.txt"
+      printf '%s' "$rci" | tr '{' '\n' > "$tmpc" 2>/dev/null || true
+      while IFS= read -r chunk || [ -n "$chunk" ]; do
+        case "$chunk" in *Wireguard*) ;; *) continue ;; esac
+        echo "$chunk" | grep -qE '"type"[[:space:]]*:[[:space:]]*"Wireguard"|"id"[[:space:]]*:[[:space:]]*"Wireguard[0-9]+"' \
+          || continue
+        id=$(printf '%s' "$chunk" | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+        [ -n "$id" ] || continue
+        case "$id" in Wireguard*|wireguard*) ;; *) continue ;; esac
+        desc=$(printf '%s' "$chunk" | sed -n 's/.*"description"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+        link=$(printf '%s' "$chunk" | sed -n 's/.*"link"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+        # linux if: Wireguard0 или nwg* уже в списке
+        ifc="$id"
+        # не дублировать, если этот ifc уже есть
+        _iflist_has "$iflistf" "$ifc" && continue
+        # если description совпадает с уже добавленным именем — тоже skip
+        if [ -n "$desc" ] && grep -q "|${desc}|" "$iflistf" 2>/dev/null; then
+          continue
+        fi
+        printf '%s|%s|%s\n' "$ifc" "${desc:-$id}" "${link:-?}" >> "$iflistf"
+      done < "$tmpc"
+      rm -f "$tmpc" 2>/dev/null || true
+    fi
   fi
 
+  # 3) sysfs: nwg*/awg*/Wireguard* которых ещё нет
+  list_tunnel_ifaces | while IFS= read -r ifc || [ -n "$ifc" ]; do
+    [ -n "$ifc" ] || continue
+    _iflist_has "$iflistf" "$ifc" && continue
+    st="?"
+    if [ -e "/sys/class/net/$ifc/operstate" ]; then
+      st=$(cat "/sys/class/net/$ifc/operstate" 2>/dev/null || echo "?")
+    fi
+    printf '%s|%s|%s\n' "$ifc" "$ifc" "$st" >> "$iflistf"
+  done
+
   if [ ! -s "$iflistf" ]; then
-    error "Не найдены интерфейсы nwg*/awg* (awg-manager / sysfs)."
+    error "Не найдены туннели (awg-manager / RCI Wireguard / sysfs)."
     return 1
   fi
 
