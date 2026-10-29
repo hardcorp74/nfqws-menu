@@ -18,7 +18,7 @@
 #   sh installer_warpscout.sh
 #   curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_warpscout.sh | sh
 
-SCRIPT_VERSION="0.1.20"
+SCRIPT_VERSION="0.1.21"
 
 # ANSI (portable для ash/BusyBox)
 RED=$(printf '\033[0;31m')
@@ -921,10 +921,11 @@ awg_list_tunnels() {
         taddr_v4=$(printf '%s' "$taddr" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | \
           sed -n 's|^\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)\(/[0-9]*\)\{0,1\}$|\1|p' | head -1)
         tifc=$(printf '%s' "$chunk" | sed -n 's/.*"interfaceName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+        tndms=$(printf '%s' "$chunk" | sed -n 's/.*"ndmsName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
         # отсекаем куски без status (вложенные pingCheck и т.п.)
         [ -n "$tstat" ] || continue
-        # id|name|status|endpoint|ipv4|iface
-        printf '%s|%s|%s|%s|%s|%s\n' "$tid" "${tname:-?}" "${tstat:-?}" "${tend:-}" "${taddr_v4:-}" "${tifc:-}" >> "$out"
+        # id|name|status|endpoint|ipv4|iface|ndms
+        printf '%s|%s|%s|%s|%s|%s|%s\n' "$tid" "${tname:-?}" "${tstat:-?}" "${tend:-}" "${taddr_v4:-}" "${tifc:-}" "${tndms:-}" >> "$out"
         ;;
     esac
   done < "$tmpc"
@@ -975,29 +976,29 @@ awg_patch_conf_address() {
 # Адреса системных Wireguard* из RCI → файл: name|ipv4
 # (Keenetic «Системный» туннель может не быть в awg-manager /tunnels/list)
 rci_wireguard_addrs() {
+  # out: id|description|ipv4
   out="$1"
   : > "$out"
   rci=$(curl -s --connect-timeout 1 --max-time 3 "http://127.0.0.1:79/rci/show/interface" 2>/dev/null) || rci=""
   [ -n "$rci" ] || return 1
   tmpc="$out.rci"
-  # один объект на строку по разделителю '{'
   printf '%s' "$rci" | tr '{' '\n' > "$tmpc" 2>/dev/null || true
   while IFS= read -r chunk || [ -n "$chunk" ]; do
-    # интересуют только фрагменты Wireguard
     case "$chunk" in
       *Wireguard*) ;;
       *) continue ;;
     esac
-    # type=Wireguard или id=WireguardN
     echo "$chunk" | grep -qE '"type"[[:space:]]*:[[:space:]]*"Wireguard"|"id"[[:space:]]*:[[:space:]]*"Wireguard[0-9]+"' \
       || continue
+    id=$(printf '%s' "$chunk" | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+    case "$id" in
+      Wireguard*|wireguard*) ;;
+      *) continue ;;
+    esac
     addr=$(printf '%s' "$chunk" | sed -n 's/.*"address"[[:space:]]*:[[:space:]]*"\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)".*/\1/p' | head -1)
     [ -n "$addr" ] || continue
     desc=$(printf '%s' "$chunk" | sed -n 's/.*"description"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
-    id=$(printf '%s' "$chunk" | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
-    label="${desc:-$id}"
-    [ -n "$label" ] || label="Wireguard"
-    printf '%s|%s\n' "$label" "$addr" >> "$out"
+    printf '%s|%s|%s\n' "$id" "${desc:-$id}" "$addr" >> "$out"
   done < "$tmpc"
   rm -f "$tmpc" 2>/dev/null || true
   [ -s "$out" ]
@@ -1005,7 +1006,7 @@ rci_wireguard_addrs() {
 
 # Если IPv4 conf занят другими туннелями (awg-manager + системные Wireguard)
 # кроме skip_id — взять свободный 172.16.0.x
-# listf: id|name|status|endpoint|ipv4|iface
+# listf: id|name|status|endpoint|ipv4|iface|ndms
 awg_ensure_free_address() {
   conf="$1"
   listf="$2"
@@ -1017,12 +1018,12 @@ awg_ensure_free_address() {
     return 0
   fi
 
-  # адрес текущего туннеля (skip) — не считаем чужим
-  skip_addr=""
+  # NDMS-интерфейс заменяемого туннеля (только его исключаем из RCI)
+  skip_ndms=""
   if [ -n "$skip_id" ] && [ -s "$listf" ]; then
-    while IFS='|' read -r _aid _aname _astat _aend _aaddr _aifc || [ -n "$_aid" ]; do
+    while IFS='|' read -r _aid _aname _astat _aend _aaddr _aifc _andms || [ -n "$_aid" ]; do
       if [ "$_aid" = "$skip_id" ]; then
-        skip_addr="$_aaddr"
+        skip_ndms="$_andms"
         break
       fi
     done < "$listf"
@@ -1036,7 +1037,7 @@ awg_ensure_free_address() {
 
   # 1) awg-manager tunnels
   if [ -s "$listf" ]; then
-    while IFS='|' read -r _aid _aname _astat _aend _aaddr _aifc || [ -n "$_aid" ]; do
+    while IFS='|' read -r _aid _aname _astat _aend _aaddr _aifc _andms || [ -n "$_aid" ]; do
       [ -n "$_aaddr" ] || continue
       if [ -n "$skip_id" ] && [ "$_aid" = "$skip_id" ]; then
         continue
@@ -1046,17 +1047,27 @@ awg_ensure_free_address() {
     done < "$listf"
   fi
 
-  # 2) системные Wireguard* из RCI
+  # 2) системные Wireguard* из RCI (всегда, кроме NDMS того же туннеля)
+  # формат rcif: id|name|addr  — расширяем rci_wireguard_addrs
   rcif="$TMPDIR/rci-wg-addr.txt"
   if rci_wireguard_addrs "$rcif" 2>/dev/null; then
-    while IFS='|' read -r rname raddr || [ -n "$rname" ]; do
+    while IFS='|' read -r rid rname raddr || [ -n "$rid" ]; do
+      # поддержка старого формата name|addr (2 поля)
+      if [ -z "$raddr" ] && [ -n "$rname" ]; then
+        raddr="$rname"
+        rname="$rid"
+        rid=""
+      fi
       [ -n "$raddr" ] || continue
-      # тот же адрес, что у заменяемого туннеля — NDMS-интерфейс того же туннеля
-      if [ -n "$skip_addr" ] && [ "$raddr" = "$skip_addr" ]; then
+      # исключаем только NDMS-интерфейс текущего туннеля (Wireguard1 и т.п.)
+      if [ -n "$skip_ndms" ] && [ "$rid" = "$skip_ndms" ]; then
+        continue
+      fi
+      if [ -n "$skip_ndms" ] && [ "$rname" = "$skip_ndms" ]; then
         continue
       fi
       printf '%s\n' "$raddr" >> "$usedf"
-      printf '%s|RCI %s\n' "$raddr" "${rname:-Wireguard}" >> "$used_src"
+      printf '%s|RCI %s\n' "$raddr" "${rname:-$rid}" >> "$used_src"
     done < "$rcif"
   fi
 
@@ -1351,7 +1362,7 @@ do_apply_awg() {
   printf '%s\n' "${BOLD}Туннели awg-manager:${NC}"
   i=0
   if [ -s "$listf" ]; then
-    while IFS='|' read -r tid tname tstat tend taddr tifc || [ -n "$tid" ]; do
+    while IFS='|' read -r tid tname tstat tend taddr tifc tndms || [ -n "$tid" ]; do
       [ -n "$tid" ] || continue
       i=$((i + 1))
       printf '  %s%d)%s  %s  %s[%s]%s  %s%s%s\n' \
