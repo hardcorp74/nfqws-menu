@@ -17,7 +17,7 @@
 #   sh installer_warpscout.sh
 #   curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_warpscout.sh | sh
 
-SCRIPT_VERSION="0.1.14"
+SCRIPT_VERSION="0.1.15"
 
 # ANSI (portable для ash/BusyBox)
 RED=$(printf '\033[0;31m')
@@ -485,8 +485,197 @@ parse_find_junk_log() {
   return 0
 }
 
+
+# Прописать Jc/Jmin/Jmax/I1 в conf (секция [Interface])
+patch_conf_junk() {
+  conf="$1"
+  [ -f "$conf" ] || return 1
+  load_junk_params || return 1
+
+  tmp="$conf.junknew"
+  # awk: обновляет или добавляет ключи в [Interface]
+  awk -v jc="$JC" -v jmin="$JMIN" -v jmax="$JMAX" -v i1="$I1" '
+    BEGIN {
+      inif=0
+      seen_jc=0; seen_jmin=0; seen_jmax=0; seen_i1=0
+    }
+    function flush_missing() {
+      if (jc != "" && !seen_jc)   print "Jc = " jc
+      if (jmin != "" && !seen_jmin) print "Jmin = " jmin
+      if (jmax != "" && !seen_jmax) print "Jmax = " jmax
+      if (i1 != "" && !seen_i1)   print "I1 = " i1
+      seen_jc=1; seen_jmin=1; seen_jmax=1; seen_i1=1
+    }
+    /^\[Interface\]/ { inif=1; print; next }
+    /^\[/ {
+      if (inif) { flush_missing(); inif=0 }
+      print; next
+    }
+    inif && /^[[:space:]]*[Jj][Cc][[:space:]]*=/ {
+      if (jc != "") { print "Jc = " jc; seen_jc=1; next }
+    }
+    inif && /^[[:space:]]*[Jj][Mm][Ii][Nn][[:space:]]*=/ {
+      if (jmin != "") { print "Jmin = " jmin; seen_jmin=1; next }
+    }
+    inif && /^[[:space:]]*[Jj][Mm][Aa][Xx][[:space:]]*=/ {
+      if (jmax != "") { print "Jmax = " jmax; seen_jmax=1; next }
+    }
+    inif && /^[[:space:]]*[Ii]1[[:space:]]*=/ {
+      if (i1 != "") { print "I1 = " i1; seen_i1=1; next }
+    }
+    { print }
+    END {
+      if (inif) flush_missing()
+      else if (!seen_jc && !seen_jmin && !seen_jmax && !seen_i1 && (jc!=""||jmin!=""||jmax!=""||i1!="")) {
+        print "[Interface]"
+        flush_missing()
+      }
+    }
+  ' "$conf" > "$tmp" 2>/dev/null || return 1
+  mv -f "$tmp" "$conf" || return 1
+  info "В $conf записаны junk-параметры:"
+  [ -n "$JC" ] && info "  Jc = $JC"
+  [ -n "$JMIN" ] && info "  Jmin = $JMIN"
+  [ -n "$JMAX" ] && info "  Jmax = $JMAX"
+  [ -n "$I1" ] && info "  I1 = $I1"
+  return 0
+}
+
+# Replace conf в выбранный туннель awg-manager (без смены endpoint/имени)
+awg_replace_conf_file() {
+  conf="$1"
+  [ -f "$conf" ] || { error "Нет conf: $conf"; return 1; }
+  if ! is_awg_manager_installed; then
+    error "awg-manager не установлен."
+    return 1
+  fi
+  if ! command -v curl >/dev/null 2>&1; then
+    error "Нужен curl."
+    return 1
+  fi
+  base=$(awg_api_base)
+  if ! awg_load_api_key; then
+    error "API-ключ не задан."
+    return 1
+  fi
+  key="$AWG_KEY"
+  listf="$TMPDIR/awg-tunnels-junk.txt"
+  mkdir -p "$TMPDIR" 2>/dev/null || true
+  info "Запрос списка туннелей..."
+  if ! awg_list_tunnels "$base" "$key" "$listf"; then
+    error "Нет туннелей."
+    return 1
+  fi
+
+  echo
+  printf '%s\n' "${BOLD}Туннель для apply junk:${NC}"
+  i=0
+  while IFS='|' read -r tid tname tstat tend taddr tifc || [ -n "$tid" ]; do
+    [ -n "$tid" ] || continue
+    i=$((i + 1))
+    printf '  %s%d)%s  %s  %s[%s]%s  %s\n' \
+      "$BOLD" "$i" "$NC" "$tid" "$DIM" "$tstat" "$NC" \
+      "${tname}${tifc:+ · $tifc}"
+  done < "$listf"
+  echo "  0) Отмена"
+  echo
+  printf '  %sВыбор:%s ' "$BOLD" "$NC"
+  sel=$(read_choice)
+  echo
+  case "$sel" in
+    0|"") info "Отменено."; return 0 ;;
+    *[!0-9]*) warn "Неверный выбор."; return 1 ;;
+  esac
+  if [ "$sel" -lt 1 ] || [ "$sel" -gt "$i" ]; then
+    warn "Неверный номер."; return 1
+  fi
+  tid=$(sed -n "${sel}p" "$listf" | cut -d'|' -f1)
+  tname=$(sed -n "${sel}p" "$listf" | cut -d'|' -f2)
+  [ -n "$tid" ] || { error "Пустой id."; return 1; }
+
+  info "Остановка $tid..."
+  awg_control stop "$tid" "$key" "$base" || true
+
+  bodyf="$TMPDIR/awg-junk-replace.json"
+  {
+    printf '{"content":"'
+    tr -d '\r' < "$conf" | sed 's/\\/\\\\/g;s/"/\\"/g;s/\t/\\t/g' | awk '{printf "%s\\n",$0}'
+    printf '"}'
+  } > "$bodyf"
+
+  info "POST ${base}/tunnels/replace?id=${tid}  (junk → «${tname}»)"
+  resp=$(curl -sS --connect-timeout 5 --max-time 30 \
+    -X POST "${base}/tunnels/replace?id=${tid}" \
+    -H "Authorization: Bearer ${key}" \
+    -H "Content-Type: application/json" \
+    -d @"$bodyf" 2>/dev/null) || resp=""
+  if ! printf '%s' "$resp" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
+    error "replace не удался."
+    [ -n "$resp" ] && printf '%s\n' "$resp"
+    return 1
+  fi
+  info "Конфиг туннеля $tid обновлён (junk)."
+  sleep 1
+  info "Запуск $tid..."
+  if ! awg_control start "$tid" "$key" "$base"; then
+    awg_control restart "$tid" "$key" "$base" || true
+  fi
+  return 0
+}
+
+# Применить сохранённый junk к conf и/или туннелю
+do_apply_junk() {
+  echo
+  info "Применение junk-параметров"
+  if ! load_junk_params; then
+    error "Нет $JUNK_FILE — сначала п.6 find-junk."
+    return 1
+  fi
+  info "Текущие: jc=${JC:-?} jmin=${JMIN:-?} jmax=${JMAX:-?}"
+  [ -n "$I1" ] && info "  i1=$I1"
+
+  echo
+  printf '%s\n' "${BOLD}Куда применить:${NC}"
+  echo "  1) Только conf ($CONF_OUT)"
+  if is_awg_manager_installed; then
+    echo "  2) conf + replace в туннель awg-manager"
+  else
+    printf '  %s2) conf + replace в туннель%s  %s(нужен awg-manager)%s\n' "$DIM" "$NC" "$DIM" "$NC"
+  fi
+  echo "  0) Отмена"
+  echo
+  printf '  %sВыбор:%s ' "$BOLD" "$NC"
+  sel=$(read_choice)
+  echo
+  case "$sel" in
+    0|"") info "Отменено."; return 0 ;;
+    1)
+      if ! has_conf; then
+        error "Нет conf: $CONF_OUT (сначала п.3 scan)."
+        return 1
+      fi
+      patch_conf_junk "$CONF_OUT" || return 1
+      return 0
+      ;;
+    2)
+      if ! is_awg_manager_installed; then
+        error "awg-manager не установлен."
+        return 1
+      fi
+      if ! has_conf; then
+        error "Нет conf: $CONF_OUT (сначала п.3 scan)."
+        return 1
+      fi
+      patch_conf_junk "$CONF_OUT" || return 1
+      awg_replace_conf_file "$CONF_OUT" || return 1
+      return 0
+      ;;
+    *) warn "Неверный выбор."; return 1 ;;
+  esac
+}
+
 # ---------------------------------------------------------------------------
-# 6) Автоматический поиск junk (find-junk)
+# 6) Автоматический поиск junk (find-junk) + apply к conf/туннелю
 # ---------------------------------------------------------------------------
 do_find_junk() {
   echo
@@ -498,6 +687,23 @@ do_find_junk() {
   if ! has_account; then
     error "Нет аккаунта. Сначала пункт 2 (register)."
     return 1
+  fi
+
+  if load_junk_params; then
+    echo
+    info "Уже есть junk: jc=${JC:-?} jmin=${JMIN:-?} jmax=${JMAX:-?}"
+    echo "  1) Искать заново (find-junk)"
+    echo "  2) Применить сохранённые к conf / туннелю"
+    echo "  0) Отмена"
+    echo
+    printf '  %sВыбор:%s ' "$BOLD" "$NC"
+    pre=$(read_choice)
+    echo
+    case "$pre" in
+      0|"") info "Отменено."; return 0 ;;
+      2) do_apply_junk; return $? ;;
+      *) ;; # искать
+    esac
   fi
 
   echo
@@ -541,7 +747,11 @@ do_find_junk() {
 
   if parse_find_junk_log "$logf"; then
     save_junk_params "$JC" "$JMIN" "$JMAX" "$I1"
-    info "Дальше п.3 (сканирование) подхватит эти параметры автоматически."
+    info "П.3 (scan) подхватит параметры автоматически."
+    echo
+    if confirm_yes "Применить junk к conf / туннелю сейчас?"; then
+      do_apply_junk || true
+    fi
   else
     warn "Не удалось разобрать jc/jmin/jmax из вывода find-junk."
     [ -f "$logf" ] && printf '%s\n' "${DIM}Лог: $logf${NC}"
@@ -1533,7 +1743,7 @@ main_menu() {
         "$DIM" "$NC" "$DIM" "$NC"
     fi
     echo "  5) Проверка туннеля"
-    echo "  6) Автоматический поиск (find-junk)"
+    echo "  6) Автоматический поиск / apply junk (find-junk)"
     printf '%s\n' "${DIM}  ──────────────────────────────────────────${NC}"
     echo "  88) Удаление"
     echo "  0) Выход"
