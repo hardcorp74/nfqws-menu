@@ -18,7 +18,7 @@
 #   sh installer_warpscout.sh
 #   curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_warpscout.sh | sh
 
-SCRIPT_VERSION="0.1.21"
+SCRIPT_VERSION="0.1.22"
 
 # ANSI (portable для ash/BusyBox)
 RED=$(printf '\033[0;31m')
@@ -1018,12 +1018,18 @@ awg_ensure_free_address() {
     return 0
   fi
 
-  # NDMS-интерфейс заменяемого туннеля (только его исключаем из RCI)
+  # Исключаем только интерфейсы заменяемого туннеля (не «тот же IP»)
   skip_ndms=""
+  skip_ifc=""
   if [ -n "$skip_id" ] && [ -s "$listf" ]; then
     while IFS='|' read -r _aid _aname _astat _aend _aaddr _aifc _andms || [ -n "$_aid" ]; do
       if [ "$_aid" = "$skip_id" ]; then
         skip_ndms="$_andms"
+        skip_ifc="$_aifc"
+        # interfaceName иногда приходит как "nwg1|Wireguard1"
+        case "$skip_ifc" in
+          *'|'*) skip_ifc=$(printf '%s' "$skip_ifc" | cut -d'|' -f1) ;;
+        esac
         break
       fi
     done < "$listf"
@@ -1035,6 +1041,13 @@ awg_ensure_free_address() {
   : > "$usedf"
   : > "$used_src"
 
+  _used_add() {
+    # _used_add IP SRC
+    [ -n "$1" ] || return 0
+    printf '%s\n' "$1" >> "$usedf"
+    printf '%s|%s\n' "$1" "$2" >> "$used_src"
+  }
+
   # 1) awg-manager tunnels
   if [ -s "$listf" ]; then
     while IFS='|' read -r _aid _aname _astat _aend _aaddr _aifc _andms || [ -n "$_aid" ]; do
@@ -1042,34 +1055,45 @@ awg_ensure_free_address() {
       if [ -n "$skip_id" ] && [ "$_aid" = "$skip_id" ]; then
         continue
       fi
-      printf '%s\n' "$_aaddr" >> "$usedf"
-      printf '%s|awg-manager %s (%s)\n' "$_aaddr" "${_aid}" "${_aname:-?}" >> "$used_src"
+      _used_add "$_aaddr" "awg-manager ${_aid} (${_aname:-?})"
     done < "$listf"
   fi
 
-  # 2) системные Wireguard* из RCI (всегда, кроме NDMS того же туннеля)
-  # формат rcif: id|name|addr  — расширяем rci_wireguard_addrs
+  # 2) RCI Wireguard* — кроме NDMS текущего туннеля
   rcif="$TMPDIR/rci-wg-addr.txt"
   if rci_wireguard_addrs "$rcif" 2>/dev/null; then
     while IFS='|' read -r rid rname raddr || [ -n "$rid" ]; do
-      # поддержка старого формата name|addr (2 поля)
       if [ -z "$raddr" ] && [ -n "$rname" ]; then
-        raddr="$rname"
-        rname="$rid"
-        rid=""
+        raddr="$rname"; rname="$rid"; rid=""
       fi
       [ -n "$raddr" ] || continue
-      # исключаем только NDMS-интерфейс текущего туннеля (Wireguard1 и т.п.)
-      if [ -n "$skip_ndms" ] && [ "$rid" = "$skip_ndms" ]; then
+      if [ -n "$skip_ndms" ] && { [ "$rid" = "$skip_ndms" ] || [ "$rname" = "$skip_ndms" ]; }; then
         continue
       fi
-      if [ -n "$skip_ndms" ] && [ "$rname" = "$skip_ndms" ]; then
-        continue
-      fi
-      printf '%s\n' "$raddr" >> "$usedf"
-      printf '%s|RCI %s\n' "$raddr" "${rname:-$rid}" >> "$used_src"
+      _used_add "$raddr" "RCI ${rname:-$rid}"
     done < "$rcif"
   fi
+
+  # 3) Живые адреса nwg*/Wireguard*/awg* (ip addr) — UI/RCI могут расходиться
+  for _path in /sys/class/net/nwg* /sys/class/net/Wireguard* /sys/class/net/wireguard* /sys/class/net/awg*; do
+    [ -e "$_path" ] || continue
+    _bif=$(basename "$_path")
+    if [ -n "$skip_ifc" ] && [ "$_bif" = "$skip_ifc" ]; then
+      continue
+    fi
+    if [ -n "$skip_ndms" ] && [ "$_bif" = "$skip_ndms" ]; then
+      continue
+    fi
+    _a=""
+    if command -v ip >/dev/null 2>&1; then
+      _a=$(ip -4 -o addr show dev "$_bif" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1)
+    fi
+    if [ -z "$_a" ] && command -v ifconfig >/dev/null 2>&1; then
+      _a=$(ifconfig "$_bif" 2>/dev/null | sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p;s/.*inet \([0-9.]*\).*/\1/p' | head -1)
+    fi
+    [ -n "$_a" ] || continue
+    _used_add "$_a" "iface ${_bif}"
+  done
 
   conflict=0
   conflict_src=""
