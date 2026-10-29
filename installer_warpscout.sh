@@ -18,7 +18,7 @@
 #   sh installer_warpscout.sh
 #   curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_warpscout.sh | sh
 
-SCRIPT_VERSION="0.1.19"
+SCRIPT_VERSION="0.1.20"
 
 # ANSI (portable для ash/BusyBox)
 RED=$(printf '\033[0;31m')
@@ -593,6 +593,11 @@ awg_replace_conf_file() {
   tid=$(sed -n "${sel}p" "$listf" | cut -d'|' -f1)
   tname=$(sed -n "${sel}p" "$listf" | cut -d'|' -f2)
   [ -n "$tid" ] || { error "Пустой id."; return 1; }
+
+  # conf после scan/find-junk часто с Address=172.16.0.2 — конфликт с системным WG
+  if ! awg_ensure_free_address "$conf" "$listf" "$tid"; then
+    return 1
+  fi
 
   info "Остановка $tid..."
   awg_control stop "$tid" "$key" "$base" || true
