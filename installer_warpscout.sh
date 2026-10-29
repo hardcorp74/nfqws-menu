@@ -10,13 +10,14 @@
 # 2) Создать аккаунт (warpscout register)
 # 3) Сканирование адресов (AWG → list + conf)
 # 4) Применить conf в awg-manager (если установлен)
+# 5) Проверка туннеля (curl --interface nwg*/awg*)
 # 88) Удаление
 #
 # Запуск:
 #   sh installer_warpscout.sh
 #   curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_warpscout.sh | sh
 
-SCRIPT_VERSION="0.1.10"
+SCRIPT_VERSION="0.1.11"
 
 # ANSI (portable для ash/BusyBox)
 RED=$(printf '\033[0;31m')
@@ -1044,6 +1045,21 @@ do_apply_awg() {
     return 1
   fi
 
+  def_name="WARP-${SELECTED_NODE}"
+  printf '%s' "${YELLOW}[?]${NC} Имя туннеля [${def_name}] (Enter = ${def_name}, «-» = не менять «${tname}»): "
+  new_name=$(read_choice)
+  echo
+  case "$new_name" in
+    -) new_name="" ;;   # не менять
+    "") new_name="$def_name" ;;
+  esac
+  if [ -n "$new_name" ] && [ "$new_name" != "$tname" ]; then
+    info "Имя: «${tname}» → «${new_name}»"
+  else
+    new_name=""
+    info "Имя без изменений: «${tname}»"
+  fi
+
   if ! confirm_yes "Заменить conf «${tname}» (id=$tid) → Endpoint ${SELECTED_EP} [${SELECTED_NODE}]?"; then
     info "Отменено."
     return 0
@@ -1056,7 +1072,11 @@ do_apply_awg() {
   {
     printf '{"content":"'
     tr -d '\r' < "$conf_use" | sed 's/\\/\\\\/g;s/"/\\"/g;s/\t/\\t/g' | awk '{printf "%s\\n",$0}'
-    printf '"}'
+    if [ -n "$new_name" ]; then
+      printf '","name":"%s"}' "$new_name"
+    else
+      printf '"}'
+    fi
   } > "$bodyf"
 
   info "POST ${base}/tunnels/replace?id=${tid}"
@@ -1082,6 +1102,211 @@ do_apply_awg() {
     awg_control restart "$tid" "$key" "$base" || true
   fi
   return 0
+}
+
+
+# ---------------------------------------------------------------------------
+# 5) Проверка туннеля (через интерфейс nwg*/awg*)
+# ---------------------------------------------------------------------------
+lookup_colo() {
+  code="$1"
+  [ -n "$code" ] || return 1
+  case "$code" in
+    HEL) printf '%s' "Хельсинки, Финляндия"; return 0 ;;
+    ARN) printf '%s' "Стокгольм, Швеция"; return 0 ;;
+    OSL) printf '%s' "Осло, Норвегия"; return 0 ;;
+    CPH) printf '%s' "Копенгаген, Дания"; return 0 ;;
+    FRA) printf '%s' "Франкфурт, Германия"; return 0 ;;
+    AMS) printf '%s' "Амстердам, Нидерланды"; return 0 ;;
+    LHR|LON) printf '%s' "Лондон, Великобритания"; return 0 ;;
+    WAW) printf '%s' "Варшава, Польша"; return 0 ;;
+    VIE) printf '%s' "Вена, Австрия"; return 0 ;;
+    PRG) printf '%s' "Прага, Чехия"; return 0 ;;
+    LED|SVO|DME|VKO) printf '%s' "Москва, Россия"; return 0 ;;
+    MSQ) printf '%s' "Минск, Беларусь"; return 0 ;;
+    IST) printf '%s' "Стамбул, Турция"; return 0 ;;
+    DXB) printf '%s' "Дубай, ОАЭ"; return 0 ;;
+    SIN) printf '%s' "Сингапур"; return 0 ;;
+    NRT|HND) printf '%s' "Токио, Япония"; return 0 ;;
+    LAX) printf '%s' "Лос-Анджелес, США"; return 0 ;;
+    EWR|JFK|LGA) printf '%s' "Нью-Йорк, США"; return 0 ;;
+    CDG) printf '%s' "Париж, Франция"; return 0 ;;
+  esac
+  return 1
+}
+
+show_cf_trace() {
+  ifc="$1"
+  if ! command -v curl >/dev/null 2>&1; then
+    warn "curl нет — trace недоступен"
+    return 1
+  fi
+  info "Cloudflare trace (cdn-cgi/trace) via $ifc..."
+  trace=$(curl -sS --connect-timeout 5 --max-time 10 --interface "$ifc" \
+    "https://cloudflare.com/cdn-cgi/trace" 2>/dev/null) || trace=""
+  if [ -z "$trace" ]; then
+    warn "trace: нет ответа via $ifc"
+    return 1
+  fi
+  cf_ip=$(printf '%s\n' "$trace" | sed -n 's/^ip=//p' | head -1)
+  cf_colo=$(printf '%s\n' "$trace" | sed -n 's/^colo=//p' | head -1)
+  cf_loc=$(printf '%s\n' "$trace" | sed -n 's/^loc=//p' | head -1)
+  cf_warp=$(printf '%s\n' "$trace" | sed -n 's/^warp=//p' | head -1)
+  cf_http=$(printf '%s\n' "$trace" | sed -n 's/^http=//p' | head -1)
+  cf_tls=$(printf '%s\n' "$trace" | sed -n 's/^tls=//p' | head -1)
+  [ -n "$cf_ip" ] && info "  ip=$cf_ip"
+  if [ -n "$cf_colo" ]; then
+    colo_name=$(lookup_colo "$cf_colo" 2>/dev/null) || colo_name=""
+    if [ -n "$colo_name" ]; then
+      info "  colo=$cf_colo — $colo_name"
+    else
+      info "  colo=$cf_colo"
+    fi
+  fi
+  [ -n "$cf_loc" ] && info "  loc=$cf_loc"
+  [ -n "$cf_warp" ] && info "  warp=$cf_warp"
+  [ -n "$cf_http" ] && info "  http=$cf_http"
+  [ -n "$cf_tls" ] && info "  tls=$cf_tls"
+  case "$cf_warp" in
+    on|ON) info "  WARP: активен" ;;
+    off|OFF) warn "  WARP: off (трафик не через WARP?)" ;;
+  esac
+  return 0
+}
+
+check_url_via_iface() {
+  ifc="$1"
+  url="$2"
+  label="$3"
+  code="000"
+  if ! command -v curl >/dev/null 2>&1; then
+    error "Нужен curl."
+    return 1
+  fi
+  errf="$TMPDIR/curl-err-$$"
+  mkdir -p "$TMPDIR" 2>/dev/null || true
+  code=$(curl -sS -o /dev/null -w '%{http_code}' \
+    --connect-timeout 5 --max-time 10 \
+    --interface "$ifc" -L "$url" 2>"$errf") || true
+  code=$(printf '%s' "$code" | tr -d '\r\n ')
+  case "$code" in
+    ''|*[!0-9]*) code="000" ;;
+  esac
+  err=""
+  [ -s "$errf" ] && err=$(tr '\n' ' ' < "$errf" | head -c 100)
+  rm -f "$errf"
+  case "$code" in
+    2??|3??)
+      info "$label: OK (HTTP $code) via $ifc"
+      return 0
+      ;;
+    000)
+      warn "$label: нет ответа via $ifc${err:+ — $err}"
+      return 1
+      ;;
+    *)
+      warn "$label: HTTP $code via $ifc${err:+ — $err}"
+      return 1
+      ;;
+  esac
+}
+
+run_iface_probes() {
+  _probe_ok=0
+  check_url_via_iface "$1" "https://2ip.io/" "2ip.io" && _probe_ok=$((_probe_ok + 1))
+  check_url_via_iface "$1" "https://www.google.com/" "google.com" && _probe_ok=$((_probe_ok + 1))
+  check_url_via_iface "$1" "https://web.telegram.org/" "web.telegram.org" && _probe_ok=$((_probe_ok + 1))
+}
+
+list_tunnel_ifaces() {
+  _if_list=""
+  for n in /sys/class/net/*; do
+    [ -e "$n" ] || continue
+    b=$(basename "$n")
+    case "$b" in
+      nwg*|awg*|opkgtun*) _if_list="${_if_list} $b" ;;
+    esac
+  done
+  if [ -z "$(printf '%s' "$_if_list" | tr -d ' ')" ] && command -v ip >/dev/null 2>&1; then
+    for b in $(ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | cut -d@ -f1); do
+      case "$b" in
+        nwg*|awg*|opkgtun*) _if_list="${_if_list} $b" ;;
+      esac
+    done
+  fi
+  printf '%s\n' $_if_list | tr ' ' '\n' | grep -v '^$' | sort -u
+}
+
+do_check_tunnel() {
+  echo
+  info "Проверка туннеля"
+  if ! command -v curl >/dev/null 2>&1; then
+    error "Нужен curl."
+    return 1
+  fi
+
+  # список интерфейсов
+  iflistf="$TMPDIR/ifaces.txt"
+  mkdir -p "$TMPDIR" 2>/dev/null || true
+  list_tunnel_ifaces > "$iflistf" 2>/dev/null || true
+
+  if [ ! -s "$iflistf" ]; then
+    error "Не найдены интерфейсы nwg*/awg*/opkgtun*."
+    printf '%s\n' "${DIM}Поднимите туннель в awg-manager и повторите.${NC}"
+    return 1
+  fi
+
+  echo
+  printf '%s\n' "${BOLD}Интерфейсы:${NC}"
+  i=0
+  while IFS= read -r ifc || [ -n "$ifc" ]; do
+    [ -n "$ifc" ] || continue
+    i=$((i + 1))
+    # краткий статус
+    st=""
+    if ip link show "$ifc" 2>/dev/null | grep -q 'state UP'; then
+      st="UP"
+    elif [ -e "/sys/class/net/$ifc/operstate" ]; then
+      st=$(cat "/sys/class/net/$ifc/operstate" 2>/dev/null || echo "?")
+    fi
+    printf '  %s%d)%s  %s  %s[%s]%s\n' "$BOLD" "$i" "$NC" "$ifc" "$DIM" "${st:-?}" "$NC"
+  done < "$iflistf"
+  echo "  0) Отмена"
+  echo
+  printf '  %sВыбор:%s ' "$BOLD" "$NC"
+  sel=$(read_choice)
+  echo
+  case "$sel" in
+    0|"") info "Отменено."; return 0 ;;
+    *[!0-9]*) warn "Неверный выбор."; return 1 ;;
+  esac
+  if [ "$sel" -lt 1 ] || [ "$sel" -gt "$i" ]; then
+    warn "Неверный номер."
+    return 1
+  fi
+  iface=$(sed -n "${sel}p" "$iflistf")
+  [ -n "$iface" ] || { error "Пустой интерфейс."; return 1; }
+
+  info "Проверяем: $iface"
+  if ip link show "$iface" >/dev/null 2>&1 || [ -e "/sys/class/net/$iface" ]; then
+    info "Интерфейс $iface: есть в системе"
+  else
+    warn "Интерфейс $iface не найден (ip link)."
+  fi
+
+  echo
+  run_iface_probes "$iface"
+  ok=$_probe_ok
+  echo
+  show_cf_trace "$iface" || true
+  echo
+  if [ "$ok" -ge 2 ]; then
+    info "Проверка пройдена: $ok/3 хостов доступны через $iface"
+    return 0
+  fi
+  error "Хосты недоступны через $iface ($ok/3)"
+  printf '%s\n' "${DIM}Вручную: curl --interface $iface -m 10 -L https://2ip.io/${NC}"
+  return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -1146,6 +1371,7 @@ main_menu() {
       printf '  %s4) Применить conf в awg-manager%s  %s(нужен awg-manager)%s\n' \
         "$DIM" "$NC" "$DIM" "$NC"
     fi
+    echo "  5) Проверка туннеля"
     printf '%s\n' "${DIM}  ──────────────────────────────────────────${NC}"
     echo "  88) Удаление"
     echo "  0) Выход"
@@ -1166,6 +1392,7 @@ main_menu() {
           pause
         fi
         ;;
+      5) do_check_tunnel; pause ;;
       88) do_remove; pause ;;
       0|"") info "Выход."; exit 0 ;;
       *) warn "Неверный пункт"; pause ;;
