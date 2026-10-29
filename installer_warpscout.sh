@@ -17,7 +17,7 @@
 #   sh installer_warpscout.sh
 #   curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_warpscout.sh | sh
 
-SCRIPT_VERSION="0.1.12"
+SCRIPT_VERSION="0.1.14"
 
 # ANSI (portable для ash/BusyBox)
 RED=$(printf '\033[0;31m')
@@ -37,6 +37,7 @@ BIN="/opt/bin/warpscout"
 ACCOUNT_FILE="/opt/root/warpscout-account.json"
 SCAN_OUT="/opt/root/warpscout-awg.list"
 CONF_OUT="/opt/root/warpscout-awg.conf"
+JUNK_FILE="/opt/root/warpscout-junk.env"
 GITHUB_REPO="vernette/warpscout"
 # фиксированная версия с готовым mipsel-бинарником в этом репозитории
 PIN_VERSION="0.16.1"
@@ -292,6 +293,9 @@ show_status() {
   if has_conf; then
     st="${st:+$st, }conf ✓"
   fi
+  if [ -f "$JUNK_FILE" ] && [ -s "$JUNK_FILE" ]; then
+    st="${st:+$st, }junk ✓"
+  fi
   if is_awg_manager_installed; then
     st="${st:+$st, }awg-manager ✓"
   fi
@@ -428,6 +432,124 @@ do_register() {
   return 1
 }
 
+
+# Загрузить найденные junk-параметры (JC JMIN JMAX I1)
+load_junk_params() {
+  JC=""; JMIN=""; JMAX=""; I1=""
+  [ -f "$JUNK_FILE" ] && [ -s "$JUNK_FILE" ] || return 1
+  # shellcheck: файл пишем сами
+  # JC=6 etc.
+  JC=$(sed -n 's/^JC=//p' "$JUNK_FILE" | head -1)
+  JMIN=$(sed -n 's/^JMIN=//p' "$JUNK_FILE" | head -1)
+  JMAX=$(sed -n 's/^JMAX=//p' "$JUNK_FILE" | head -1)
+  # I1 может содержать пробелы и <> — храним как I1=... одной строкой
+  I1=$(sed -n 's/^I1=//p' "$JUNK_FILE" | head -1)
+  [ -n "$JC" ] || [ -n "$I1" ]
+}
+
+save_junk_params() {
+  # save_junk_params jc jmin jmax i1
+  mkdir -p /opt/root 2>/dev/null || true
+  {
+    printf 'JC=%s\n' "$1"
+    printf 'JMIN=%s\n' "$2"
+    printf 'JMAX=%s\n' "$3"
+    printf 'I1=%s\n' "$4"
+  } > "$JUNK_FILE"
+  info "Параметры сохранены: $JUNK_FILE"
+  info "  -jc $1 -jmin $2 -jmax $3"
+  [ -n "$4" ] && info "  -i1 $4"
+}
+
+# Разобрать лог find-junk → JC JMIN JMAX I1
+parse_find_junk_log() {
+  logf="$1"
+  [ -f "$logf" ] || return 1
+  JC=""; JMIN=""; JMAX=""; I1=""
+  line=$(grep -E 'scan .*(-jc|--jc)' "$logf" 2>/dev/null | tail -1)
+  if [ -z "$line" ]; then
+    line=$(grep -E 'Good enough:.*jc=' "$logf" 2>/dev/null | tail -1)
+  fi
+  if [ -z "$line" ]; then
+    line=$(grep -E 'Attempt [0-9]+: jc=' "$logf" 2>/dev/null | tail -1)
+  fi
+  [ -n "$line" ] || return 1
+  JC=$(printf '%s\n' "$line" | sed -n 's/.*[[:space:]]-jc[[:space:]]\+\([0-9][0-9]*\).*/\1/p; t; s/.*jc=\([0-9][0-9]*\).*/\1/p' | head -1)
+  JMIN=$(printf '%s\n' "$line" | sed -n 's/.*[[:space:]]-jmin[[:space:]]\+\([0-9][0-9]*\).*/\1/p; t; s/.*jmin=\([0-9][0-9]*\).*/\1/p' | head -1)
+  JMAX=$(printf '%s\n' "$line" | sed -n 's/.*[[:space:]]-jmax[[:space:]]\+\([0-9][0-9]*\).*/\1/p; t; s/.*jmax=\([0-9][0-9]*\).*/\1/p' | head -1)
+  I1=$(printf '%s\n' "$line" | sed -n 's/.*-i1[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+  if [ -z "$I1" ]; then
+    I1=$(printf '%s\n' "$line" | sed -n "s/.*-i1[[:space:]]*'\([^']*\)'.*/\1/p" | head -1)
+  fi
+  [ -n "$JC" ] || return 1
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# 6) Автоматический поиск junk (find-junk)
+# ---------------------------------------------------------------------------
+do_find_junk() {
+  echo
+  info "Автоматический поиск junk-параметров (find-junk)"
+  if ! is_installed; then
+    error "warpscout не установлен. Сначала пункт 1."
+    return 1
+  fi
+  if ! has_account; then
+    error "Нет аккаунта. Сначала пункт 2 (register)."
+    return 1
+  fi
+
+  echo
+  printf '%s\n' "${BOLD}-gen-i1 профиль:${NC}"
+  echo "  1) random  (по умолчанию)"
+  echo "  2) quic"
+  echo "  3) dns"
+  echo "  4) sip"
+  echo "  5) stun"
+  echo "  0) Отмена"
+  echo
+  printf '  %sВыбор:%s ' "$BOLD" "$NC"
+  sel=$(read_choice)
+  echo
+  case "$sel" in
+    0) info "Отменено."; return 0 ;;
+    2) gen_i1="quic" ;;
+    3) gen_i1="dns" ;;
+    4) gen_i1="sip" ;;
+    5) gen_i1="stun" ;;
+    *) gen_i1="random" ;;
+  esac
+
+  mkdir -p /opt/root "$TMPDIR" 2>/dev/null || true
+  cd /opt/root || true
+  logf="$TMPDIR/find-junk.log"
+
+  info "Команда: warpscout find-junk -gen-i1 $gen_i1"
+  info "Поиск может занять много времени. Ctrl+C / q — сохранить лучший набор."
+  echo
+  # вывод на экран + в лог
+  if command -v tee >/dev/null 2>&1; then
+    "$BIN" find-junk -gen-i1 "$gen_i1" 2>&1 | tee "$logf"
+    rc=$?
+  else
+    "$BIN" find-junk -gen-i1 "$gen_i1" >"$logf" 2>&1
+    rc=$?
+    cat "$logf" 2>/dev/null || true
+  fi
+  echo
+
+  if parse_find_junk_log "$logf"; then
+    save_junk_params "$JC" "$JMIN" "$JMAX" "$I1"
+    info "Дальше п.3 (сканирование) подхватит эти параметры автоматически."
+  else
+    warn "Не удалось разобрать jc/jmin/jmax из вывода find-junk."
+    [ -f "$logf" ] && printf '%s\n' "${DIM}Лог: $logf${NC}"
+    [ "$rc" -ne 0 ] && return 1
+  fi
+  return 0
+}
+
 # ---------------------------------------------------------------------------
 # 3) Сканирование AWG (+ готовый conf)
 # ---------------------------------------------------------------------------
@@ -446,11 +568,22 @@ do_scan() {
   mkdir -p /opt/root 2>/dev/null || true
   cd /opt/root || true
 
-  info "Команда: warpscout scan -p awg -P -o $SCAN_OUT -conf $CONF_OUT"
+  set -- scan -p awg -P -o "$SCAN_OUT" -conf "$CONF_OUT"
+  if load_junk_params; then
+    info "Используем junk из $JUNK_FILE: jc=$JC jmin=$JMIN jmax=$JMAX"
+    [ -n "$JC" ] && set -- "$@" -jc "$JC"
+    [ -n "$JMIN" ] && set -- "$@" -jmin "$JMIN"
+    [ -n "$JMAX" ] && set -- "$@" -jmax "$JMAX"
+    [ -n "$I1" ] && set -- "$@" -i1 "$I1"
+  else
+    info "Junk-параметры не заданы (п.6 find-junk) — дефолты warpscout."
+  fi
+
+  info "Команда: warpscout $*"
   info "Это может занять несколько минут..."
   echo
 
-  if ! "$BIN" scan -p awg -P -o "$SCAN_OUT" -conf "$CONF_OUT"; then
+  if ! "$BIN" "$@"; then
     error "scan завершился с ошибкой."
     return 1
   fi
@@ -1047,23 +1180,19 @@ do_apply_awg() {
   fi
 
   def_name="WARP-${SELECTED_NODE}"
-  printf '%s' "${YELLOW}[?]${NC} Имя туннеля [${def_name}] (Enter = ${def_name}, «-» = не менять «${tname}»): "
+  printf '%s' "${YELLOW}[?]${NC} Имя туннеля [${def_name}] (Enter = ${def_name}, «-» = оставить «${tname}», 0 = отмена): "
   new_name=$(read_choice)
   echo
   case "$new_name" in
-    -) new_name="" ;;   # не менять
+    0) info "Отменено."; return 0 ;;
+    -) new_name="" ;;
     "") new_name="$def_name" ;;
   esac
   if [ -n "$new_name" ] && [ "$new_name" != "$tname" ]; then
-    info "Имя: «${tname}» → «${new_name}»"
+    info "Замена: id=$tid  «${tname}» → «${new_name}»  Endpoint ${SELECTED_EP} [${SELECTED_NODE}]"
   else
     new_name=""
-    info "Имя без изменений: «${tname}»"
-  fi
-
-  if ! confirm_yes "Заменить conf «${tname}» (id=$tid) → Endpoint ${SELECTED_EP} [${SELECTED_NODE}]?"; then
-    info "Отменено."
-    return 0
+    info "Замена: id=$tid  «${tname}»  Endpoint ${SELECTED_EP} [${SELECTED_NODE}]"
   fi
 
   info "Остановка $tid (перед replace)..."
@@ -1370,6 +1499,7 @@ do_remove() {
     [ -f "$ACCOUNT_FILE" ] && rm -f "$ACCOUNT_FILE" && info "  удалён: $ACCOUNT_FILE"
     [ -f "$SCAN_OUT" ] && rm -f "$SCAN_OUT" && info "  удалён: $SCAN_OUT"
     [ -f "$CONF_OUT" ] && rm -f "$CONF_OUT" && info "  удалён: $CONF_OUT"
+    [ -f "$JUNK_FILE" ] && rm -f "$JUNK_FILE" && info "  удалён: $JUNK_FILE"
   fi
 
   info "Готово."
@@ -1403,6 +1533,7 @@ main_menu() {
         "$DIM" "$NC" "$DIM" "$NC"
     fi
     echo "  5) Проверка туннеля"
+    echo "  6) Автоматический поиск (find-junk)"
     printf '%s\n' "${DIM}  ──────────────────────────────────────────${NC}"
     echo "  88) Удаление"
     echo "  0) Выход"
@@ -1424,6 +1555,7 @@ main_menu() {
         fi
         ;;
       5) do_check_tunnel; pause ;;
+      6) do_find_junk; pause ;;
       88) do_remove; pause ;;
       0|"") info "Выход."; exit 0 ;;
       *) warn "Неверный пункт"; pause ;;

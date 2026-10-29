@@ -459,7 +459,8 @@ curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_
 3. **Сканирование (AWG)** — `warpscout scan -p awg -P -o /opt/root/warpscout-awg.list -conf /opt/root/warpscout-awg.conf` (отчёт + готовый conf лучшего эндпоинта)
 4. **Применить conf в awg-manager** — если установлен awg-manager: выбор endpoint (*Best endpoint per node*) → подстановка `Endpoint`/свободный `Address` → **replace** (без delete, маршрутизация сохраняется) или import; при replace предлагается имя `WARP-ARN` / `WARP-DME`; после replace/import — `start`
 5. **Проверка туннеля** — выбор интерфейса `nwg*`/`awg*` → HTTP-пробы (2ip / google / telegram) + Cloudflare `cdn-cgi/trace` (`warp=on`, colo)
-6. **Удаление** — бинарник; по подтверждению аккаунт, list и conf
+6. **Автоматический поиск (find-junk)** — `warpscout find-junk -gen-i1 random|quic|dns|sip|stun`; найденные `-jc/-jmin/-jmax/-i1` → `/opt/root/warpscout-junk.env`, подхватываются п.3 (scan)
+7. **Удаление** — бинарник; по подтверждению аккаунт, list, conf, junk
 
 ### 77. Change language
 
@@ -500,7 +501,7 @@ curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_
 
 ### 0.10.21
 
-- **п. 18 warpscout** — `installer_warpscout.sh` v0.1.11: bin aarch64/mipsel, register, scan AWG → list+conf, apply в awg-manager (endpoint Best-per-node, Address conflict, replace+имя WARP-NODE, start), проверка туннеля (curl --interface)
+- **п. 18 warpscout** — `installer_warpscout.sh` v0.1.14: bin, register, scan (+junk из find-junk), apply awg-manager, проверка туннеля, **find-junk** → `warpscout-junk.env`
 
 ### 0.10.16
 
