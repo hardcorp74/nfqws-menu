@@ -18,7 +18,7 @@
 #   sh installer_warpscout.sh
 #   curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_warpscout.sh | sh
 
-SCRIPT_VERSION="0.1.23"
+SCRIPT_VERSION="0.1.24"
 
 # ANSI (portable для ash/BusyBox)
 RED=$(printf '\033[0;31m')
@@ -238,6 +238,16 @@ confirm_yes() {
   case "$c" in
     y|Y|yes|YES|д|Д|да|Да) return 0 ;;
     *) return 1 ;;
+  esac
+}
+
+# Да по умолчанию [Y/n]
+confirm_Y() {
+  printf '%s' "${YELLOW}[?]${NC} $1 [Y/n]: "
+  c=$(read_choice)
+  case "$c" in
+    n|N|no|NO|н|Н|нет|Нет) return 1 ;;
+    *) return 0 ;;
   esac
 }
 
@@ -755,7 +765,7 @@ do_find_junk() {
     save_junk_params "$JC" "$JMIN" "$JMAX" "$I1"
     info "П.3 (scan) подхватит параметры автоматически."
     echo
-    if confirm_yes "Применить junk к conf / туннелю сейчас?"; then
+    if confirm_Y "Применить junk к conf / туннелю сейчас?"; then
       do_apply_junk || true
     fi
   else
