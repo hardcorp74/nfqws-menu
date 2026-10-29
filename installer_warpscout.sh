@@ -18,7 +18,7 @@
 #   sh installer_warpscout.sh
 #   curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_warpscout.sh | sh
 
-SCRIPT_VERSION="0.1.16"
+SCRIPT_VERSION="0.1.17"
 
 # ANSI (portable для ash/BusyBox)
 RED=$(printf '\033[0;31m')
@@ -1658,10 +1658,7 @@ do_check_tunnel() {
   fi
   [ -n "$iface" ] || { error "Пустой интерфейс."; return 1; }
 
-  info "Проверяем: $iface${tlabel:+ · $tlabel}"
-  if ip link show "$iface" >/dev/null 2>&1 || [ -e "/sys/class/net/$iface" ]; then
-    info "Интерфейс $iface: есть в системе"
-  else
+  if ! ip link show "$iface" >/dev/null 2>&1 && [ ! -e "/sys/class/net/$iface" ]; then
     warn "Интерфейс $iface не найден (ip link)."
   fi
 
