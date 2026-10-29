@@ -17,7 +17,7 @@
 #   sh installer_warpscout.sh
 #   curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_warpscout.sh | sh
 
-SCRIPT_VERSION="0.1.11"
+SCRIPT_VERSION="0.1.12"
 
 # ANSI (portable для ash/BusyBox)
 RED=$(printf '\033[0;31m')
@@ -571,10 +571,11 @@ awg_list_tunnels() {
         taddr=$(printf '%s' "$chunk" | sed -n 's/.*"address"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
         taddr_v4=$(printf '%s' "$taddr" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | \
           sed -n 's|^\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)\(/[0-9]*\)\{0,1\}$|\1|p' | head -1)
+        tifc=$(printf '%s' "$chunk" | sed -n 's/.*"interfaceName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
         # отсекаем куски без status (вложенные pingCheck и т.п.)
         [ -n "$tstat" ] || continue
-        # id|name|status|endpoint|ipv4
-        printf '%s|%s|%s|%s|%s\n' "$tid" "${tname:-?}" "${tstat:-?}" "${tend:-}" "${taddr_v4:-}" >> "$out"
+        # id|name|status|endpoint|ipv4|iface
+        printf '%s|%s|%s|%s|%s|%s\n' "$tid" "${tname:-?}" "${tstat:-?}" "${tend:-}" "${taddr_v4:-}" "${tifc:-}" >> "$out"
         ;;
     esac
   done < "$tmpc"
@@ -640,7 +641,7 @@ awg_ensure_free_address() {
   conflict=0
   conflict_id=""
   if [ -s "$listf" ]; then
-    while IFS='|' read -r _aid _aname _astat _aend _aaddr || [ -n "$_aid" ]; do
+    while IFS='|' read -r _aid _aname _astat _aend _aaddr _aifc || [ -n "$_aid" ]; do
       [ -n "$_aid" ] || continue
       [ -n "$_aaddr" ] || continue
       if [ -n "$skip_id" ] && [ "$_aid" = "$skip_id" ]; then
@@ -663,7 +664,7 @@ awg_ensure_free_address() {
   usedf="$TMPDIR/used-addr.txt"
   : > "$usedf"
   if [ -s "$listf" ]; then
-    while IFS='|' read -r _aid _aname _astat _aend _aaddr || [ -n "$_aid" ]; do
+    while IFS='|' read -r _aid _aname _astat _aend _aaddr _aifc || [ -n "$_aid" ]; do
       [ -n "$_aaddr" ] || continue
       if [ -n "$skip_id" ] && [ "$_aid" = "$skip_id" ]; then
         continue
@@ -951,12 +952,12 @@ do_apply_awg() {
   printf '%s\n' "${BOLD}Туннели awg-manager:${NC}"
   i=0
   if [ -s "$listf" ]; then
-    while IFS='|' read -r tid tname tstat tend taddr || [ -n "$tid" ]; do
+    while IFS='|' read -r tid tname tstat tend taddr tifc || [ -n "$tid" ]; do
       [ -n "$tid" ] || continue
       i=$((i + 1))
-      printf '  %s%d)%s  %s  %s[%s]%s  %s%s\n' \
+      printf '  %s%d)%s  %s  %s[%s]%s  %s%s%s\n' \
         "$BOLD" "$i" "$NC" "$tid" "$DIM" "$tstat" "$NC" \
-        "${tname}${tend:+ · $tend}" "${taddr:+ · $taddr}"
+        "${tname}${tend:+ · $tend}" "${taddr:+ · $taddr}" "${tifc:+ · $tifc}"
     done < "$listf"
   fi
   new_idx=$((i + 1))
@@ -1245,49 +1246,79 @@ do_check_tunnel() {
     return 1
   fi
 
-  # список интерфейсов
+  # ifc|name|status  (имя из awg-manager, если доступен)
   iflistf="$TMPDIR/ifaces.txt"
   mkdir -p "$TMPDIR" 2>/dev/null || true
-  list_tunnel_ifaces > "$iflistf" 2>/dev/null || true
+  : > "$iflistf"
+
+  if is_awg_manager_installed && command -v curl >/dev/null 2>&1; then
+    base=$(awg_api_base)
+    if awg_load_api_key 2>/dev/null; then
+      listf="$TMPDIR/awg-tunnels-check.txt"
+      if awg_list_tunnels "$base" "$AWG_KEY" "$listf" 2>/dev/null; then
+        while IFS='|' read -r _tid tname tstat _tend _taddr tifc || [ -n "$_tid" ]; do
+          [ -n "$tifc" ] || continue
+          printf '%s|%s|%s\n' "$tifc" "${tname:-?}" "${tstat:-?}" >> "$iflistf"
+        done < "$listf"
+      fi
+    fi
+  fi
+
+  # fallback: sysfs без имён
+  if [ ! -s "$iflistf" ]; then
+    list_tunnel_ifaces | while IFS= read -r ifc || [ -n "$ifc" ]; do
+      [ -n "$ifc" ] || continue
+      st="?"
+      if [ -e "/sys/class/net/$ifc/operstate" ]; then
+        st=$(cat "/sys/class/net/$ifc/operstate" 2>/dev/null || echo "?")
+      fi
+      printf '%s|%s|%s\n' "$ifc" "$ifc" "$st"
+    done > "$iflistf"
+  fi
 
   if [ ! -s "$iflistf" ]; then
-    error "Не найдены интерфейсы nwg*/awg*/opkgtun*."
-    printf '%s\n' "${DIM}Поднимите туннель в awg-manager и повторите.${NC}"
+    error "Не найдены интерфейсы nwg*/awg* (awg-manager / sysfs)."
     return 1
   fi
 
-  echo
-  printf '%s\n' "${BOLD}Интерфейсы:${NC}"
-  i=0
-  while IFS= read -r ifc || [ -n "$ifc" ]; do
-    [ -n "$ifc" ] || continue
-    i=$((i + 1))
-    # краткий статус
-    st=""
-    if ip link show "$ifc" 2>/dev/null | grep -q 'state UP'; then
-      st="UP"
-    elif [ -e "/sys/class/net/$ifc/operstate" ]; then
-      st=$(cat "/sys/class/net/$ifc/operstate" 2>/dev/null || echo "?")
+  i=$(wc -l < "$iflistf" 2>/dev/null | tr -d ' ')
+  case "$i" in ''|*[!0-9]*) i=0 ;; esac
+
+  # один интерфейс — без меню
+  if [ "$i" -eq 1 ]; then
+    iface=$(sed -n '1p' "$iflistf" | cut -d'|' -f1)
+    tlabel=$(sed -n '1p' "$iflistf" | cut -d'|' -f2)
+    tstat=$(sed -n '1p' "$iflistf" | cut -d'|' -f3)
+    info "Интерфейс: $iface · ${tlabel} [${tstat}]"
+  else
+    echo
+    printf '%s\n' "${BOLD}Туннели / интерфейсы:${NC}"
+    n=0
+    while IFS='|' read -r ifc tlabel tstat || [ -n "$ifc" ]; do
+      [ -n "$ifc" ] || continue
+      n=$((n + 1))
+      printf '  %s%d)%s  %s  %s[%s]%s  %s\n' \
+        "$BOLD" "$n" "$NC" "$ifc" "$DIM" "${tstat:-?}" "$NC" "$tlabel"
+    done < "$iflistf"
+    echo "  0) Отмена"
+    echo
+    printf '  %sВыбор:%s ' "$BOLD" "$NC"
+    sel=$(read_choice)
+    echo
+    case "$sel" in
+      0|"") info "Отменено."; return 0 ;;
+      *[!0-9]*) warn "Неверный выбор."; return 1 ;;
+    esac
+    if [ "$sel" -lt 1 ] || [ "$sel" -gt "$n" ]; then
+      warn "Неверный номер."
+      return 1
     fi
-    printf '  %s%d)%s  %s  %s[%s]%s\n' "$BOLD" "$i" "$NC" "$ifc" "$DIM" "${st:-?}" "$NC"
-  done < "$iflistf"
-  echo "  0) Отмена"
-  echo
-  printf '  %sВыбор:%s ' "$BOLD" "$NC"
-  sel=$(read_choice)
-  echo
-  case "$sel" in
-    0|"") info "Отменено."; return 0 ;;
-    *[!0-9]*) warn "Неверный выбор."; return 1 ;;
-  esac
-  if [ "$sel" -lt 1 ] || [ "$sel" -gt "$i" ]; then
-    warn "Неверный номер."
-    return 1
+    iface=$(sed -n "${sel}p" "$iflistf" | cut -d'|' -f1)
+    tlabel=$(sed -n "${sel}p" "$iflistf" | cut -d'|' -f2)
   fi
-  iface=$(sed -n "${sel}p" "$iflistf")
   [ -n "$iface" ] || { error "Пустой интерфейс."; return 1; }
 
-  info "Проверяем: $iface"
+  info "Проверяем: $iface${tlabel:+ · $tlabel}"
   if ip link show "$iface" >/dev/null 2>&1 || [ -e "/sys/class/net/$iface" ]; then
     info "Интерфейс $iface: есть в системе"
   else
