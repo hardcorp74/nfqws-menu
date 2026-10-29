@@ -18,7 +18,7 @@
 #   sh installer_warpscout.sh
 #   curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_warpscout.sh | sh
 
-SCRIPT_VERSION="0.1.17"
+SCRIPT_VERSION="0.1.18"
 
 # ANSI (portable для ash/BusyBox)
 RED=$(printf '\033[0;31m')
@@ -967,10 +967,40 @@ awg_patch_conf_address() {
   return 0
 }
 
-# Если IPv4 conf занят другими туннелями (кроме skip_id) — взять свободный 172.16.0.x
-# listf: id|name|status|endpoint|ipv4
-# conf: файл для правки
-# Важно: не использовать имя tid в while — в ash оно затирает переменную вызывающего кода.
+# Адреса системных Wireguard* из RCI → файл: name|ipv4
+# (Keenetic «Системный» туннель может не быть в awg-manager /tunnels/list)
+rci_wireguard_addrs() {
+  out="$1"
+  : > "$out"
+  rci=$(curl -s --connect-timeout 1 --max-time 3 "http://127.0.0.1:79/rci/show/interface" 2>/dev/null) || rci=""
+  [ -n "$rci" ] || return 1
+  tmpc="$out.rci"
+  # один объект на строку по разделителю '{'
+  printf '%s' "$rci" | tr '{' '\n' > "$tmpc" 2>/dev/null || true
+  while IFS= read -r chunk || [ -n "$chunk" ]; do
+    # интересуют только фрагменты Wireguard
+    case "$chunk" in
+      *Wireguard*) ;;
+      *) continue ;;
+    esac
+    # type=Wireguard или id=WireguardN
+    echo "$chunk" | grep -qE '"type"[[:space:]]*:[[:space:]]*"Wireguard"|"id"[[:space:]]*:[[:space:]]*"Wireguard[0-9]+"' \
+      || continue
+    addr=$(printf '%s' "$chunk" | sed -n 's/.*"address"[[:space:]]*:[[:space:]]*"\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)".*/\1/p' | head -1)
+    [ -n "$addr" ] || continue
+    desc=$(printf '%s' "$chunk" | sed -n 's/.*"description"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+    id=$(printf '%s' "$chunk" | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+    label="${desc:-$id}"
+    [ -n "$label" ] || label="Wireguard"
+    printf '%s|%s\n' "$label" "$addr" >> "$out"
+  done < "$tmpc"
+  rm -f "$tmpc" 2>/dev/null || true
+  [ -s "$out" ]
+}
+
+# Если IPv4 conf занят другими туннелями (awg-manager + системные Wireguard)
+# кроме skip_id — взять свободный 172.16.0.x
+# listf: id|name|status|endpoint|ipv4|iface
 awg_ensure_free_address() {
   conf="$1"
   listf="$2"
@@ -982,31 +1012,24 @@ awg_ensure_free_address() {
     return 0
   fi
 
-  conflict=0
-  conflict_id=""
-  if [ -s "$listf" ]; then
+  # адрес текущего туннеля (skip) — не считаем чужим
+  skip_addr=""
+  if [ -n "$skip_id" ] && [ -s "$listf" ]; then
     while IFS='|' read -r _aid _aname _astat _aend _aaddr _aifc || [ -n "$_aid" ]; do
-      [ -n "$_aid" ] || continue
-      [ -n "$_aaddr" ] || continue
-      if [ -n "$skip_id" ] && [ "$_aid" = "$skip_id" ]; then
-        continue
-      fi
-      if [ "$_aaddr" = "$cur" ]; then
-        conflict=1
-        conflict_id="$_aid"
+      if [ "$_aid" = "$skip_id" ]; then
+        skip_addr="$_aaddr"
         break
       fi
     done < "$listf"
   fi
 
-  if [ "$conflict" != "1" ]; then
-    info "Address $cur свободен (или только у текущего туннеля)."
-    return 0
-  fi
-  warn "Адрес $cur уже у туннеля ${conflict_id} — ищем свободный."
-
   usedf="$TMPDIR/used-addr.txt"
+  used_src="$TMPDIR/used-addr-src.txt"
+  mkdir -p "$TMPDIR" 2>/dev/null || true
   : > "$usedf"
+  : > "$used_src"
+
+  # 1) awg-manager tunnels
   if [ -s "$listf" ]; then
     while IFS='|' read -r _aid _aname _astat _aend _aaddr _aifc || [ -n "$_aid" ]; do
       [ -n "$_aaddr" ] || continue
@@ -1014,8 +1037,36 @@ awg_ensure_free_address() {
         continue
       fi
       printf '%s\n' "$_aaddr" >> "$usedf"
+      printf '%s|awg-manager %s (%s)\n' "$_aaddr" "${_aid}" "${_aname:-?}" >> "$used_src"
     done < "$listf"
   fi
+
+  # 2) системные Wireguard* из RCI
+  rcif="$TMPDIR/rci-wg-addr.txt"
+  if rci_wireguard_addrs "$rcif" 2>/dev/null; then
+    while IFS='|' read -r rname raddr || [ -n "$rname" ]; do
+      [ -n "$raddr" ] || continue
+      # тот же адрес, что у заменяемого туннеля — NDMS-интерфейс того же туннеля
+      if [ -n "$skip_addr" ] && [ "$raddr" = "$skip_addr" ]; then
+        continue
+      fi
+      printf '%s\n' "$raddr" >> "$usedf"
+      printf '%s|RCI %s\n' "$raddr" "${rname:-Wireguard}" >> "$used_src"
+    done < "$rcif"
+  fi
+
+  conflict=0
+  conflict_src=""
+  if grep -qxF "$cur" "$usedf" 2>/dev/null; then
+    conflict=1
+    conflict_src=$(grep -F "${cur}|" "$used_src" 2>/dev/null | head -1 | cut -d'|' -f2-)
+  fi
+
+  if [ "$conflict" != "1" ]; then
+    info "Address $cur свободен (awg-manager + системные Wireguard)."
+    return 0
+  fi
+  warn "Адрес $cur занят: ${conflict_src:-?} — ищем свободный."
 
   free=""
   n=2
@@ -1043,7 +1094,6 @@ awg_ensure_free_address() {
   error "Не удалось записать Address = $free"
   return 1
 }
-
 
 # Разбор секции «Best endpoint per node» из list → файл: NODE|ENDPOINT|TUN_PING|LOSS|LOCATION
 # Пример строки:
