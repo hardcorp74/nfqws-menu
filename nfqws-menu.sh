@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.10.22"
+SCRIPT_VERSION="0.10.23"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -1032,8 +1032,10 @@ show_installed() {
   echo
   printf '%s\n' "${BOLD}${LBL_INSTALLED}${NC}"
 
-  # port 90 / sing-box — один раз
+  # port 90 (nfqws-keenetic-web) / 8090 (nfqws2-ui) / sing-box — один раз
+  local ui_up=0
   port_is_open 90 && web_up=1
+  port_is_open 8090 && ui_up=1
   { [ -x /opt/etc/awg-manager/singbox/sing-box ] || [ -f /opt/etc/awg-manager/singbox/sing-box ]; } && has_sb=1
 
   # Внешние tool-версии (не из opkg) — до awk
@@ -1094,7 +1096,7 @@ show_installed() {
   fi
 
   out=$(
-    WEB_UP="$web_up" HAS_SB="$has_sb" \
+    WEB_UP="$web_up" UI_UP="$ui_up" HAS_SB="$has_sb" \
     G="$GREEN" N="$NC" R="${RUN_MARK}" U="${UPD_MARK}" D="$DIM" \
     awk -v none="$LBL_NONE" '
     function ver_gt(a, b,   i, na, nb, xa, xb, ca, cb) {
@@ -1135,6 +1137,7 @@ show_installed() {
       G = ENVIRON["G"]; N = ENVIRON["N"]; R = ENVIRON["R"]
       U = ENVIRON["U"]; D = ENVIRON["D"]
       WEB_UP = ENVIRON["WEB_UP"] + 0
+      UI_UP  = ENVIRON["UI_UP"] + 0
       HAS_SB = ENVIRON["HAS_SB"] + 0
     }
     /^---PROC---$/ { section = "proc"; next }
@@ -1187,6 +1190,10 @@ show_installed() {
       if ("nfqws-keenetic-web" in opkg) {
         m = mark_run(WEB_UP || proc_has("lighttpd")) mark_upd("nfqws-keenetic-web", opkg["nfqws-keenetic-web"])
         row("nfqws-keenetic-web", opkg["nfqws-keenetic-web"], m)
+      }
+      if ("nfqws2-ui" in opkg) {
+        m = mark_run(UI_UP || proc_has("lighttpd")) mark_upd("nfqws2-ui", opkg["nfqws2-ui"])
+        row("nfqws2-ui", opkg["nfqws2-ui"], m)
       }
       if ("usque-keenetic" in opkg) {
         m = mark_run(proc_has("usque")) mark_upd("usque-keenetic", opkg["usque-keenetic"])
@@ -5029,6 +5036,7 @@ menu_remove() {
   is_installed "nfqws-keenetic"     && items="$items nfqws-keenetic"
   is_installed "nfqws2-keenetic"    && items="$items nfqws2-keenetic"
   is_installed "nfqws-keenetic-web" && items="$items nfqws-keenetic-web"
+  is_installed "nfqws2-ui"          && items="$items nfqws2-ui"
   is_dpi_detector_installed         && items="$items dpi-detector"
   is_awg_manager_installed          && items="$items awg-manager"
   is_tg_ws_proxy_rs_installed       && items="$items tg-ws-proxy-rs"
@@ -5061,7 +5069,7 @@ menu_remove() {
       if confirm_no "Точно удалить все пакеты NFQWS (и dpi-detector, если есть)?"; then
         stop_nfqws2_hard
         stop_nfqws1_hard
-        opkg remove nfqws-keenetic-web nfqws2-keenetic nfqws-keenetic 2>/dev/null || true
+        opkg remove nfqws2-ui nfqws-keenetic-web nfqws2-keenetic nfqws-keenetic 2>/dev/null || true
         stop_nfqws2_hard
         stop_nfqws1_hard
         remove_dpi_detector
@@ -5086,6 +5094,10 @@ menu_remove() {
         opera-proxy)   remove_opera_proxy ;;
         KeenKit)       remove_keenkit ;;
         telemt)        remove_telemt ;;
+        nfqws2-ui)
+          opkg remove nfqws2-ui
+          info "nfqws2-ui удалён."
+          ;;
         nfqws-keenetic|nfqws2-keenetic)
           remove_nfqws_pkg "$target" || true
           info "$target удалён."
