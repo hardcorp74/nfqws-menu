@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.10.23"
+SCRIPT_VERSION="0.10.24"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -5025,6 +5025,36 @@ remove_nfqws_pkg() {
   esac
 }
 
+# Хвосты nfqws2-ui после opkg remove (настройки / снимки / история)
+remove_nfqws2_ui_leftovers() {
+  local paths="/opt/etc/nfqws-ui /opt/etc/nfqws2/.snapshots /opt/etc/nfqws2/.history"
+  local p found=0
+  for p in $paths; do
+    [ -e "$p" ] && found=1 && break
+  done
+  [ "$found" -eq 1 ] || return 0
+
+  warn "Остались данные nfqws2-ui:"
+  for p in $paths; do
+    [ -e "$p" ] && printf '  %s\n' "$p"
+  done
+  if confirm_no "Удалить эти хвосты (настройки, снимки, история)?"; then
+    for p in $paths; do
+      if [ -e "$p" ]; then
+        rm -rf "$p" && info "  удалён: $p" || warn "  не удалось удалить: $p"
+      fi
+    done
+  else
+    info "Хвосты оставлены."
+  fi
+}
+
+remove_nfqws2_ui() {
+  opkg remove nfqws2-ui
+  info "nfqws2-ui удалён."
+  remove_nfqws2_ui_leftovers
+}
+
 menu_remove() {
   echo
   printf '%s\n' "${BOLD}Что удалить?${NC}"
@@ -5069,7 +5099,11 @@ menu_remove() {
       if confirm_no "Точно удалить все пакеты NFQWS (и dpi-detector, если есть)?"; then
         stop_nfqws2_hard
         stop_nfqws1_hard
-        opkg remove nfqws2-ui nfqws-keenetic-web nfqws2-keenetic nfqws-keenetic 2>/dev/null || true
+        if is_installed "nfqws2-ui"; then
+          opkg remove nfqws2-ui 2>/dev/null || true
+          remove_nfqws2_ui_leftovers
+        fi
+        opkg remove nfqws-keenetic-web nfqws2-keenetic nfqws-keenetic 2>/dev/null || true
         stop_nfqws2_hard
         stop_nfqws1_hard
         remove_dpi_detector
@@ -5095,8 +5129,7 @@ menu_remove() {
         KeenKit)       remove_keenkit ;;
         telemt)        remove_telemt ;;
         nfqws2-ui)
-          opkg remove nfqws2-ui
-          info "nfqws2-ui удалён."
+          remove_nfqws2_ui
           ;;
         nfqws-keenetic|nfqws2-keenetic)
           remove_nfqws_pkg "$target" || true
