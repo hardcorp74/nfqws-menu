@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.10.24"
+SCRIPT_VERSION="0.10.25"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -1237,7 +1237,7 @@ show_installed() {
       # прочие init.d
       skip["nfqws"]=1; skip["nfqws2"]=1; skip["lighttpd"]=1; skip["usque"]=1
       skip["tg-ws-proxy"]=1; skip["tg-ws-proxy-rs"]=1; skip["magitrickle"]=1
-      skip["telemt"]=1; skip["telemt-panel"]=1
+      skip["telemt"]=1; skip["telemt-panel"]=1; skip["firc"]=1
       if (("awg-manager" in opkg) || awgdir) skip["awg-manager"]=1
       for (svc in inits) {
         if (svc in skip) continue
