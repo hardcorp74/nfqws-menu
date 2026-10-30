@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.10.25"
+SCRIPT_VERSION="0.10.26"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -1023,8 +1023,8 @@ port_is_open() {
 # Метки ⭡: ключи UPD_CACHE = nfqws-keenetic|nfqws2-keenetic|nfqws-keenetic-web|
 #   tg-ws-proxy-rs|dpi-detector|awg-manager (см. upd_check_bg).
 show_installed() {
-  local out web_up=0 has_sb=0
-  local extras="" rs_ver dpi_ver kk_ver
+  local out web_up=0 ui_up=0 has_sb=0 extras="" v
+
   PORT90_CACHE=""
   refresh_opkg_cache
   refresh_proc_cache
@@ -1032,62 +1032,56 @@ show_installed() {
   echo
   printf '%s\n' "${BOLD}${LBL_INSTALLED}${NC}"
 
-  # port 90 (nfqws-keenetic-web) / 8090 (nfqws2-ui) / sing-box — один раз
-  local ui_up=0
+  # порты web/ui и sing-box — по одному разу
   port_is_open 90 && web_up=1
   port_is_open 8090 && ui_up=1
   { [ -x /opt/etc/awg-manager/singbox/sing-box ] || [ -f /opt/etc/awg-manager/singbox/sing-box ]; } && has_sb=1
 
-  # Внешние tool-версии (не из opkg) — до awk
+  # --- внешние tools (не из opkg status) → extras tool|name|ver|proc ---
   if [ -x "${TG_WS_PROXY_RS_BIN:-/opt/bin/tg-ws-proxy-rs}" ]; then
-    rs_ver=$(tg_ws_proxy_rs_version 2>/dev/null) || rs_ver="ok"
-    extras="${extras}tool|tg-ws-proxy-rs|${rs_ver:-ok}|tg-ws-proxy-rs
+    v=$(tg_ws_proxy_rs_version 2>/dev/null) || v="ok"
+    extras="${extras}tool|tg-ws-proxy-rs|${v:-ok}|tg-ws-proxy-rs
 "
   fi
-  if [ -x /opt/bin/dpi-detector ] || command -v dpi-detector >/dev/null 2>&1; then
-    dpi_ver=$(dpi_detector_version 2>/dev/null) || dpi_ver="ok"
-    extras="${extras}tool|dpi-detector|${dpi_ver:-ok}|
+  if [ -x /opt/bin/dpi-detector ]; then
+    v=$(dpi_detector_version 2>/dev/null) || v="ok"
+    extras="${extras}tool|dpi-detector|${v:-ok}|
 "
   fi
   if [ -f /opt/keenkit.sh ]; then
-    kk_ver=$(sed -n 's/^SCRIPT_VERSION=["'\'']\([^"'\'']*\)["'\''].*/\1/p' /opt/keenkit.sh 2>/dev/null | head -1)
-    extras="${extras}tool|KeenKit|${kk_ver:-ok}|
+    v=$(sed -n 's/^SCRIPT_VERSION=["'\'']\([^"'\'']*\)["'\''].*/\1/p' /opt/keenkit.sh 2>/dev/null | head -1)
+    extras="${extras}tool|KeenKit|${v:-ok}|
 "
   fi
+  # telemt / telemt-panel: .version → (telemt) бинарь --version → (panel) pkg_version из кэша
   if [ -x /opt/usr/bin/telemt ] || [ -x /opt/etc/init.d/S99telemt ] || [ -d /opt/etc/telemt ]; then
-    _tm_ver=""
-    [ -f /opt/etc/telemt/.version ] && _tm_ver=$(head -n1 /opt/etc/telemt/.version 2>/dev/null | tr -d ' \r\n')
-    case "$_tm_ver" in v*|V*) _tm_ver=$(printf '%s' "$_tm_ver" | sed 's/^[vV]//') ;; esac
-    if [ -z "$_tm_ver" ] && [ -x /opt/usr/bin/telemt ]; then
-      _tm_ver=$(/opt/usr/bin/telemt --version 2>/dev/null | head -n1 | sed -n 's/.*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')
+    v=""
+    [ -f /opt/etc/telemt/.version ] && v=$(head -n1 /opt/etc/telemt/.version 2>/dev/null | tr -d ' \r\n')
+    case "$v" in v*|V*) v=${v#v}; v=${v#V} ;; esac
+    if [ -z "$v" ] && [ -x /opt/usr/bin/telemt ]; then
+      v=$(/opt/usr/bin/telemt --version 2>/dev/null | head -n1 | sed -n 's/.*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')
     fi
-    extras="${extras}tool|telemt|${_tm_ver:-ok}|telemt
+    extras="${extras}tool|telemt|${v:-ok}|telemt
 "
   fi
   if [ -x /opt/sbin/telemt-panel ] || [ -x /opt/etc/init.d/S99telemt-panel ] || [ -d /opt/etc/telemt-panel ]; then
-    _tp_ver=""
-    # GitHub/бинарник — не в opkg; версия только из .version (пишет установщик)
-    [ -f /opt/etc/telemt-panel/.version ] && _tp_ver=$(head -n1 /opt/etc/telemt-panel/.version 2>/dev/null | tr -d ' \r\n')
-    case "$_tp_ver" in v*|V*) _tp_ver=$(printf '%s' "$_tp_ver" | sed 's/^[vV]//') ;; esac
-    if [ -z "$_tp_ver" ]; then
-      _tp_ver=$(opkg list-installed 2>/dev/null | awk '/^telemt-panel[ -]/{print $3; exit}')
-      case "$_tp_ver" in *-* ) _tp_ver=$(printf '%s' "$_tp_ver" | cut -d- -f1) ;; esac
-    fi
-    extras="${extras}tool|telemt-panel|${_tp_ver:-ok}|telemt-panel
+    v=""
+    [ -f /opt/etc/telemt-panel/.version ] && v=$(head -n1 /opt/etc/telemt-panel/.version 2>/dev/null | tr -d ' \r\n')
+    case "$v" in v*|V*) v=${v#v}; v=${v#V} ;; esac
+    [ -z "$v" ] && v=$(pkg_version telemt-panel 2>/dev/null || true)
+    case "$v" in *-* ) v=${v%%-*} ;; esac
+    extras="${extras}tool|telemt-panel|${v:-ok}|telemt-panel
 "
   fi
-  # awg без opkg-пакета, но с каталогом
-  if [ -d /opt/etc/awg-manager ]; then
-    extras="${extras}awgdir
+  [ -d /opt/etc/awg-manager ] && extras="${extras}awgdir
 "
-  fi
-  # список S* init (имена сервисов)
+
+  # S* init → init|name (имена без Sxx)
   if [ -d /opt/etc/init.d ]; then
     local f base
     for f in /opt/etc/init.d/S[0-9][0-9]*; do
       [ -f "$f" ] && [ -x "$f" ] || continue
       base=${f##*/}
-      # S99name → name (BusyBox: ${var#S[0-9][0-9]} может не сработать — sed fallback)
       base=$(printf '%s' "$base" | sed 's/^S[0-9][0-9]//')
       [ -n "$base" ] || continue
       extras="${extras}init|${base}
@@ -1117,9 +1111,8 @@ show_installed() {
       }
       return 0
     }
-    function row(name, ver, mark,   s) {
-      s = sprintf("  %s%-22s%s %s%s", G, name, N, ver, mark)
-      print s
+    function row(name, ver, mark) {
+      printf "  %s%-22s%s %s%s\n", G, name, N, ver, mark
       shown++
     }
     function mark_run(on) { return on ? R : "" }
@@ -1130,44 +1123,45 @@ show_installed() {
       return ""
     }
     function proc_has(s) { return index(PROC, s) > 0 }
+    # pkg из opkg: proc-маркер; спец: web/ui/none
+    function emit_opkg(pkg, proc, special,   up) {
+      if (!(pkg in opkg)) return
+      if (special == "web") up = (WEB_UP || proc_has("lighttpd"))
+      else if (special == "ui") up = (UI_UP || proc_has("lighttpd"))
+      else if (proc != "") up = proc_has(proc)
+      else up = 0
+      row(pkg, opkg[pkg], mark_run(up) mark_upd(pkg, opkg[pkg]))
+    }
 
     BEGIN {
-      section = "opkg"
-      shown = 0
+      section = "opkg"; shown = 0
       G = ENVIRON["G"]; N = ENVIRON["N"]; R = ENVIRON["R"]
       U = ENVIRON["U"]; D = ENVIRON["D"]
       WEB_UP = ENVIRON["WEB_UP"] + 0
       UI_UP  = ENVIRON["UI_UP"] + 0
       HAS_SB = ENVIRON["HAS_SB"] + 0
     }
-    /^---PROC---$/ { section = "proc"; next }
-    /^---UPD---$/  { section = "upd";  next }
+    /^---PROC---$/  { section = "proc";  next }
+    /^---UPD---$/   { section = "upd";   next }
     /^---EXTRA---$/ { section = "extra"; next }
     section == "opkg" {
       if ($0 ~ /^[^ ]+ - /) {
-        pkg = $1
-        ver = $0
-        sub(/^[^ ]+ - /, "", ver)
-        opkg[pkg] = ver
+        pkg = $1; ver = $0; sub(/^[^ ]+ - /, "", ver); opkg[pkg] = ver
       }
       next
     }
     section == "proc" { PROC = PROC $0 "\n"; next }
     section == "upd" {
       if ($1 != "" && $1 != "checked") {
-        rem = $0; sub(/^[^ ]+ /, "", rem)
-        remote[$1] = rem
+        rem = $0; sub(/^[^ ]+ /, "", rem); remote[$1] = rem
       }
       next
     }
     section == "extra" {
       if ($0 == "awgdir") { awgdir = 1; next }
       if ($0 ~ /^tool\|/) {
-        n = split($0, t, "|")
-        # tool|name|ver|kind
-        tname = t[2]; tver = t[3]; tkind = t[4]
-        tools[tname] = tver
-        tkind_of[tname] = tkind
+        split($0, t, "|")
+        tools[t[2]] = t[3]
         next
       }
       if ($0 ~ /^init\|/) {
@@ -1178,74 +1172,45 @@ show_installed() {
       next
     }
     END {
-      # --- основные opkg-пакеты ---
-      if ("nfqws-keenetic" in opkg) {
-        m = mark_run(proc_has("nfqws")) mark_upd("nfqws-keenetic", opkg["nfqws-keenetic"])
-        row("nfqws-keenetic", opkg["nfqws-keenetic"], m)
-      }
-      if ("nfqws2-keenetic" in opkg) {
-        m = mark_run(proc_has("nfqws2")) mark_upd("nfqws2-keenetic", opkg["nfqws2-keenetic"])
-        row("nfqws2-keenetic", opkg["nfqws2-keenetic"], m)
-      }
-      if ("nfqws-keenetic-web" in opkg) {
-        m = mark_run(WEB_UP || proc_has("lighttpd")) mark_upd("nfqws-keenetic-web", opkg["nfqws-keenetic-web"])
-        row("nfqws-keenetic-web", opkg["nfqws-keenetic-web"], m)
-      }
-      if ("nfqws2-ui" in opkg) {
-        m = mark_run(UI_UP || proc_has("lighttpd")) mark_upd("nfqws2-ui", opkg["nfqws2-ui"])
-        row("nfqws2-ui", opkg["nfqws2-ui"], m)
-      }
-      if ("usque-keenetic" in opkg) {
-        m = mark_run(proc_has("usque")) mark_upd("usque-keenetic", opkg["usque-keenetic"])
-        row("usque-keenetic", opkg["usque-keenetic"], m)
-      }
-      if ("firc" in opkg) {
-        m = mark_run(proc_has("firc")) mark_upd("firc", opkg["firc"])
-        row("firc", opkg["firc"], m)
-      }
-      # tools (tg-ws, dpi, keenkit, telemt)
+      # порядок фиксирован (for-in в awk недетерминирован)
+      emit_opkg("nfqws-keenetic",     "nfqws",  "")
+      emit_opkg("nfqws2-keenetic",    "nfqws2", "")
+      emit_opkg("nfqws-keenetic-web", "",       "web")
+      emit_opkg("nfqws2-ui",          "",       "ui")
+      emit_opkg("usque-keenetic",     "usque",  "")
+      emit_opkg("firc",               "firc",   "")
+
       if ("tg-ws-proxy-rs" in tools) {
-        m = mark_run(proc_has("tg-ws-proxy-rs")) mark_upd("tg-ws-proxy-rs", tools["tg-ws-proxy-rs"])
-        row("tg-ws-proxy-rs", tools["tg-ws-proxy-rs"], m)
+        row("tg-ws-proxy-rs", tools["tg-ws-proxy-rs"],
+            mark_run(proc_has("tg-ws-proxy-rs")) mark_upd("tg-ws-proxy-rs", tools["tg-ws-proxy-rs"]))
       }
-      if ("magitrickle" in opkg) {
-        m = mark_run(proc_has("magitrickle")) mark_upd("magitrickle", opkg["magitrickle"])
-        row("magitrickle", opkg["magitrickle"], m)
-      }
+      emit_opkg("magitrickle", "magitrickle", "")
       if ("dpi-detector" in tools) {
-        m = mark_upd("dpi-detector", tools["dpi-detector"])
-        row("dpi-detector", tools["dpi-detector"], m)
+        row("dpi-detector", tools["dpi-detector"], mark_upd("dpi-detector", tools["dpi-detector"]))
       }
-      # awg-manager
+
       if (("awg-manager" in opkg) || awgdir) {
         aver = ("awg-manager" in opkg) ? opkg["awg-manager"] : "ok"
         if (HAS_SB) aver = aver " [+SB]"
         up = proc_has("awg-manager") || proc_has("amneziawg") || (HAS_SB && proc_has("sing-box"))
-        m = mark_run(up) mark_upd("awg-manager", ("awg-manager" in opkg) ? opkg["awg-manager"] : "")
-        row("awg-manager", aver, m)
+        row("awg-manager", aver,
+            mark_run(up) mark_upd("awg-manager", ("awg-manager" in opkg) ? opkg["awg-manager"] : ""))
       }
       if ("KeenKit" in tools) row("KeenKit", tools["KeenKit"], "")
-      if ("telemt" in tools) {
-        m = mark_run(proc_has("telemt"))
-        row("telemt", tools["telemt"], m)
-      }
-      if ("telemt-panel" in tools) {
-        m = mark_run(proc_has("telemt-panel"))
-        row("telemt-panel", tools["telemt-panel"], m)
-      }
+      if ("telemt" in tools)
+        row("telemt", tools["telemt"], mark_run(proc_has("telemt")))
+      if ("telemt-panel" in tools)
+        row("telemt-panel", tools["telemt-panel"], mark_run(proc_has("telemt-panel")))
 
-      # прочие init.d
+      # прочие init.d (cron, dropbear, opera-proxy, …)
       skip["nfqws"]=1; skip["nfqws2"]=1; skip["lighttpd"]=1; skip["usque"]=1
       skip["tg-ws-proxy"]=1; skip["tg-ws-proxy-rs"]=1; skip["magitrickle"]=1
       skip["telemt"]=1; skip["telemt-panel"]=1; skip["firc"]=1
       if (("awg-manager" in opkg) || awgdir) skip["awg-manager"]=1
       for (svc in inits) {
         if (svc in skip) continue
-        ver = (svc in opkg) ? opkg[svc] : ""
-        m = mark_run(proc_has(svc))
-        row(svc, ver, m)
+        row(svc, (svc in opkg) ? opkg[svc] : "", mark_run(proc_has(svc)))
       }
-
       if (shown == 0) printf "  %s%s%s\n", D, none, N
     }
     ' <<EOF
@@ -1261,6 +1226,7 @@ EOF
   printf '%s\n' "$out"
   echo
 }
+
 
 # ---------------------------------------------------------------------------
 # Выбор версии NFQWS (1 / 2 / both) — общий для strategy и ipset
