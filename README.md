@@ -4,7 +4,7 @@
 
 Репозиторий также служит хранилищем готовых **стратегий** обхода DPI, **blobs** и **lists**.
 
-- Скрипт: `nfqws-menu.sh` (текущая версия **0.10.21**)
+- Скрипт: `nfqws-menu.sh` (текущая версия **0.10.22**)
 - Стратегии: `strategies/`
 - Hosts: `hosts`
 - Контрольные суммы: `SHA256SUMS`, `strategies/blobs/SHA256SUMS`
@@ -136,13 +136,15 @@ menu
 1) nfqws-keenetic
 2) nfqws2-keenetic
 3) nfqws-keenetic-web
-4) Установка / обновление .ipk (обход DPI)
+4) nfqws-ui от zemidala
+5) Установка / обновление .ipk (обход DPI)
 0) Назад
 ```
 
-- **1–2** — зависимости (`ca-certificates`, `wget-ssl`), официальный opkg-репозиторий под архитектуру, установка пакета; при v2, если стоит v1 — предложение удалить старый пакет. После установки — предложение поставить веб.
-- **3** — веб-интерфейс (lighttpd + PHP, порт **90**): `http://<IP-роутера>:90`, логин/пароль Entware (`root` / `keenetic` по умолчанию).
-- **4** — прямая установка **.ipk** (обход DPI): версии с github.io, скачивание с GitHub Releases → ghproxy → github.io, затем `opkg install` локального файла (конфиги при необходимости извлекаются из .ipk).
+- **1–2** — зависимости (`ca-certificates`, `wget-ssl`), официальный opkg-репозиторий под архитектуру, установка пакета; **взаимное исключение** v1 ↔ v2 (при конфликте — предложение удалить другой пакет, иначе отмена). После установки — предложение поставить веб.
+- **3** — веб-интерфейс **nfqws-keenetic-web** (lighttpd + PHP, порт **90**): `http://<IP-роутера>:90`, логин/пароль Entware (`root` / `keenetic` по умолчанию).
+- **4** — **nfqws-ui от zemidala** ([nfqws2-ui](https://github.com/zemidala/nfqws2-ui)): установщик с GitHub Releases; нужен **nfqws2-keenetic**; адрес по умолчанию `http://<IP>:8090`, управление — `nfqws-ui-setup`.
+- **5** — прямая установка **.ipk** (обход DPI): версии с github.io, скачивание с GitHub Releases → ghproxy → github.io, затем `opkg install` локального файла (конфиги при необходимости извлекаются из .ipk).
 
 > Фикс TLS reasm с **NFQWS2 ≥ 1.3.1** входит в официальный пакет.
 
@@ -456,10 +458,10 @@ curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_
    - **aarch64**: релиз `warpscout_*_linux_arm64.tar.gz` (v0.16.1)  
    - **mipsel**: готовый бинарник из `warpscout/warpscout-0.16.1-mipsle` в этом репозитории
 2. **Создать аккаунт** — `warpscout register` → `/opt/root/warpscout-account.json`
-3. **Сканирование (AWG)** — `warpscout scan -p awg -P -o /opt/root/warpscout-awg.list -conf /opt/root/warpscout-awg.conf` (отчёт + готовый conf лучшего эндпоинта)
-4. **Применить conf в awg-manager** — если установлен awg-manager: выбор endpoint (*Best endpoint per node*) → подстановка `Endpoint`/свободный `Address` → **replace** (без delete, маршрутизация сохраняется) или import; при replace предлагается имя `WARP-ARN` / `WARP-DME`; после replace/import — `start`
-5. **Проверка туннеля** — выбор интерфейса `nwg*`/`awg*` → HTTP-пробы (2ip / google / telegram) + Cloudflare `cdn-cgi/trace` (`warp=on`, colo)
-6. **Автоматический поиск (find-junk)** — `warpscout find-junk -gen-i1 random|quic|dns|sip|stun`; найденные `-jc/-jmin/-jmax/-i1` → `/opt/root/warpscout-junk.env`, подхватываются п.3 (scan)
+3. **Сканирование (AWG)** — `warpscout scan -p awg -P -o /opt/root/warpscout-awg.list -conf /opt/root/warpscout-awg.conf` (отчёт + готовый conf; подхват junk из п.4)
+4. **Автоматический поиск / apply junk (find-junk)** — `warpscout find-junk -gen-i1 …` → `/opt/root/warpscout-junk.env`; применение к conf и/или **replace** в туннель (Jc/Jmin/Jmax/I1)
+5. **Применить conf в awg-manager** — выбор endpoint (*Best endpoint per node*) → `Endpoint`/свободный `Address` → **replace** или import; имя `WARP-ARN` / `WARP-DME`; после — `start`
+6. **Проверка туннеля** — интерфейс `nwg*`/`awg*` → HTTP-пробы + Cloudflare `cdn-cgi/trace`
 7. **Удаление** — бинарник; по подтверждению аккаунт, list, conf, junk
 
 ### 77. Change language
@@ -499,9 +501,14 @@ curl -fsSL https://raw.githubusercontent.com/rndnaame/nfqws-menu/main/installer_
 
 ## Changelog
 
+### 0.10.22
+
+- **п. 1** — пункт **4) nfqws-ui от zemidala** ([nfqws2-ui](https://github.com/zemidala/nfqws2-ui)): установка через `releases/latest/download/install.sh`; предупреждение, если нет nfqws2-keenetic; подсказка `:8090` / `nfqws-ui-setup`
+- **п. 1** — взаимное исключение **nfqws-keenetic ↔ nfqws2-keenetic**: при установке одной версии предлагается удалить другую (иначе opkg conflict); сообщение «установлен» только после реального успеха
+
 ### 0.10.21
 
-- **п. 18 warpscout** — `installer_warpscout.sh` v0.1.14: bin, register, scan (+junk из find-junk), apply awg-manager, проверка туннеля, **find-junk** → `warpscout-junk.env`
+- **п. 18 warpscout** — `installer_warpscout.sh` v0.1.16: bin, register, scan (+junk), find-junk + **apply junk к conf/туннелю**, apply awg-manager, проверка туннеля
 
 ### 0.10.16
 

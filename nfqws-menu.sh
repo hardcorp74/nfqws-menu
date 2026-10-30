@@ -10,7 +10,7 @@
 
 set -e
 
-SCRIPT_VERSION="0.10.21"
+SCRIPT_VERSION="0.10.22"
 
 REPO_URL="https://github.com/rndnaame/nfqws-menu"
 RAW_BASE="https://raw.githubusercontent.com/rndnaame/nfqws-menu/main"
@@ -1754,7 +1754,8 @@ menu_install_nfqws() {
   printf "  %s1)%s  nfqws-keenetic\n" "$GREEN" "$NC"
   printf "  %s2)%s  nfqws2-keenetic\n" "$GREEN" "$NC"
   printf "  %s3)%s  nfqws-keenetic-web\n" "$GREEN" "$NC"
-  printf "  %s4)%s  ${LBL_IPK_MENU}\n" "$GREEN" "$NC"
+  printf "  %s4)%s  nfqws-ui от zemidala\n" "$GREEN" "$NC"
+  printf "  %s5)%s  ${LBL_IPK_MENU}\n" "$GREEN" "$NC"
   printf "  %s0)%s  ${LBL_BACK_ITEM}\n" "$DIM" "$NC"
   ask "${LBL_YOUR_CHOICE} [0]: "
   read_menu choice
@@ -1762,10 +1763,40 @@ menu_install_nfqws() {
     1) install_nfqws1 ;;
     2) install_nfqws2 ;;
     3) install_web ;;
-    4) menu_install_ipk_direct ;;
+    4) install_nfqws2_ui ;;
+    5) menu_install_ipk_direct ;;
     0|"") return ;;
     *) warn "${LBL_INVALID}" ;;
   esac
+}
+
+# nfqws2-ui (zemidala) — веб-интерфейс для nfqws2
+# https://github.com/zemidala/nfqws2-ui
+NFQWS2_UI_INSTALL_URL="https://github.com/zemidala/nfqws2-ui/releases/latest/download/install.sh"
+
+install_nfqws2_ui() {
+  echo
+  info "Установка nfqws2-ui (zemidala)..."
+  if ! is_installed "nfqws2-keenetic"; then
+    warn "Рекомендуется сначала установить nfqws2-keenetic — интерфейс рассчитан на него."
+    if ! confirm_yes "Продолжить установку nfqws2-ui без nfqws2-keenetic?"; then
+      info "Отменено."
+      return 1
+    fi
+  fi
+  info "Источник: $NFQWS2_UI_INSTALL_URL"
+  # ~12 КБ; default min=8000 в run_remote_sh подходит
+  if run_remote_sh "$NFQWS2_UI_INSTALL_URL"; then
+    info "nfqws2-ui: установщик завершился."
+    info "Адрес (Keenetic): http://<IP-роутера>:8090"
+    info "Логин — root Entware (пароль как для SSH, по умолчанию keenetic)."
+    if command -v nfqws-ui-setup >/dev/null 2>&1 || [ -x /opt/sbin/nfqws-ui-setup ]; then
+      info "Управление: nfqws-ui-setup status | version | update"
+    fi
+  else
+    error "Не удалось установить nfqws2-ui."
+    return 1
+  fi
 }
 
 install_web() {
